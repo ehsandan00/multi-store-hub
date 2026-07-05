@@ -16,6 +16,10 @@ import type {
   CreateUserPayload,
   UpdateUserPayload,
   ListProductsQuery,
+  ImportPreview,
+  ImportJob,
+  PaginatedImportJobs,
+  ExportFilters,
 } from './types';
 import { useAuthStore } from './auth-store';
 
@@ -146,3 +150,75 @@ export const usersApi = {
     api.patch(`/users/${id}/password`, { newPassword }).then((r) => r.data),
   remove: (id: string) => api.delete(`/users/${id}`).then((r) => r.data),
 };
+
+// ─── Import / Export ─────────────────────────────────────────────────────────
+//
+// Export endpoints return binary files — we request them with `responseType:
+// 'blob'` and trigger a browser download via an object URL.
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke on next tick so the download has a chance to start.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export const importExportApi = {
+  exportProducts: async (filters: ExportFilters = {}): Promise<void> => {
+    const res = await api.get('/import-export/products.xlsx', {
+      params: filters,
+      responseType: 'blob',
+    });
+    const name = buildExportFileName(filters);
+    triggerDownload(res.data as Blob, `${name}.xlsx`);
+  },
+
+  exportForWooCommerce: async (siteId: string, siteName?: string): Promise<void> => {
+    const res = await api.get('/import-export/woo-commerce.csv', {
+      params: { wooCommerceForSiteId: siteId },
+      responseType: 'blob',
+    });
+    const slug = (siteName ?? 'site').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'site';
+    triggerDownload(res.data as Blob, `woocommerce-${slug}.csv`);
+  },
+
+  uploadPreview: (file: File): Promise<ImportPreview> => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post<ImportPreview>('/import-export/import/preview', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+
+  getPreview: (jobId: string) =>
+    api.get<ImportPreview>(`/import-export/import/${jobId}/preview`).then((r) => r.data),
+
+  commit: (jobId: string) =>
+    api.post<{ jobId: string; queued: boolean }>(`/import-export/import/${jobId}/commit`).then((r) => r.data),
+
+  cancel: (jobId: string) =>
+    api.post<void>(`/import-export/import/${jobId}/cancel`).then((r) => r.data),
+
+  getJob: (jobId: string) =>
+    api.get<ImportJob>(`/import-export/import/${jobId}`).then((r) => r.data),
+
+  listJobs: (page = 1, pageSize = 25) =>
+    api
+      .get<PaginatedImportJobs>('/import-export/import', { params: { page, pageSize } })
+      .then((r) => r.data),
+};
+
+function buildExportFileName(filters: ExportFilters): string {
+  const parts = ['products'];
+  if (filters.category) parts.push(`cat-${filters.category.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`);
+  if (filters.siteId) parts.push('site');
+  if (filters.minStock !== undefined || filters.maxStock !== undefined) parts.push('filtered');
+  return parts.join('-');
+}

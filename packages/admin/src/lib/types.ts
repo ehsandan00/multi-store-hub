@@ -144,3 +144,87 @@ export interface ApiError {
   error?: string;
   details?: unknown;
 }
+
+// ─── Import / Export (Phase 2) ───────────────────────────────────────────────
+
+export type ImportJobStatus = 'PREVIEW' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface ImportError {
+  row: number;
+  sku?: string;
+  message: string;
+}
+
+export interface ValidatedImportRow {
+  row: number;
+  skuMaster: string;
+  name?: string;
+  category?: string | null;
+  basePrice?: number;
+  totalStock?: number;
+  lowStockThreshold?: number;
+  expiryDate?: string | null;
+  barcode?: string | null;
+  imageUrl?: string | null;
+  description?: string | null;
+  siteSkus?: Record<string, string>;
+  action: 'create' | 'update';
+  productId?: string;
+}
+
+export interface ImportPreview {
+  jobId: string;
+  fileName: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  newCount: number;
+  updateCount: number;
+  errorCount: number;
+  errors: ImportError[];
+  rowsPreview: ValidatedImportRow[];
+}
+
+export interface ImportReport {
+  created: number;
+  updated: number;
+  failed: number;
+  errors: ImportError[];
+  startedAt: string;
+  finishedAt: string;
+}
+
+export interface ImportJob {
+  id: string;
+  kind: string;
+  status: ImportJobStatus;
+  fileName: string;
+  totalRows: number;
+  newCount: number;
+  updateCount: number;
+  errorCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  errors: ImportError[] | null;
+  rows: unknown;
+  report: ImportReport | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  user?: { email: string; fullName: string } | null;
+}
+
+export interface PaginatedImportJobs {
+  data: ImportJob[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ExportFilters {
+  category?: string;
+  siteId?: string;
+  minStock?: number;
+  maxStock?: number;
+}

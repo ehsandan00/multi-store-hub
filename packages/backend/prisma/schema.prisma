@@ -37,6 +37,14 @@ enum InventoryChangeReason {
   SYNC
 }
 
+enum ImportJobStatus {
+  PREVIEW // uploaded + validated; awaiting user confirmation
+  PROCESSING // worker applying changes
+  COMPLETED // finished successfully (may still contain per-row failures)
+  FAILED // fatal failure before/at processing time
+  CANCELLED // user dismissed the preview
+}
+
 // ─── Auth & users ─────────────────────────────────────────────────────────
 
 model User {
@@ -51,6 +59,7 @@ model User {
 
   inventoryLogs InventoryLog[]
   auditLogs     AuditLog[]
+  importJobs    ImportJob[]
 
   @@index([role])
 }
@@ -74,19 +83,19 @@ model AuditLog {
 // ─── Products & inventory ─────────────────────────────────────────────────
 
 model Product {
-  id                String   @id @default(uuid())
-  skuMaster         String   @unique
+  id                String    @id @default(uuid())
+  skuMaster         String    @unique
   name              String
   description       String?
   category          String?
-  basePrice         Decimal  @db.Decimal(12, 2)
+  basePrice         Decimal   @db.Decimal(12, 2)
   expiryDate        DateTime?
-  totalStock        Int      @default(0)
-  lowStockThreshold Int      @default(0)
+  totalStock        Int       @default(0)
+  lowStockThreshold Int       @default(0)
   imageUrl          String?
   barcode           String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   siteMappings  SiteProductMapping[]
   inventoryLogs InventoryLog[]
@@ -98,13 +107,13 @@ model Product {
 }
 
 model InventoryLog {
-  id              String                 @id @default(uuid())
+  id              String                @id @default(uuid())
   productId       String
   changeAmount    Int
   reason          InventoryChangeReason
   sourceSiteId    String?
   createdByUserId String?
-  createdAt       DateTime               @default(now())
+  createdAt       DateTime              @default(now())
 
   product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   sourceSite SiteConfig? @relation(fields: [sourceSiteId], references: [id], onDelete: SetNull)
@@ -128,10 +137,10 @@ model SiteConfig {
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
 
-  siteMappings SiteProductMapping[]
-  orders       Order[]
-  customers    Customer[]
-  syncLogs     SyncLog[]
+  siteMappings  SiteProductMapping[]
+  orders        Order[]
+  customers     Customer[]
+  syncLogs      SyncLog[]
   inventoryLogs InventoryLog[]
 
   @@index([isActive])
@@ -167,8 +176,8 @@ model SiteProductMapping {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
-  product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  site    SiteConfig  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  site    SiteConfig @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@unique([productId, siteId])
   @@index([siteId])
@@ -224,4 +233,38 @@ model OrderItem {
 
   @@index([orderId])
   @@index([productId])
+}
+
+// ─── Import jobs (Phase 2: Excel import/export) ────────────────────────────
+
+model ImportJob {
+  id              String          @id @default(uuid())
+  kind            String          @default("PRODUCT_IMPORT")
+  status          ImportJobStatus @default(PREVIEW)
+  fileName        String
+  totalRows       Int             @default(0)
+  newCount        Int             @default(0)
+  updateCount     Int             @default(0)
+  errorCount      Int             @default(0)
+  // Filled in by the worker after commit:
+  createdCount    Int             @default(0)
+  updatedCount    Int             @default(0)
+  failedCount     Int             @default(0)
+  // Structured payload:
+  // - errors: [{ row, sku, message }]
+  // - rows:   validated rows pending commit (cleared after commit to save space)
+  // - report: final summary after commit
+  errors          Json?
+  rows            Json?
+  report          Json?
+  createdByUserId String?
+  createdAt       DateTime        @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  user User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([createdByUserId])
 }

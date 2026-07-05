@@ -10,6 +10,7 @@ import { Dashboard } from './pages/Dashboard';
 import { ProductsList } from './pages/Products/List';
 import { ProductDetail } from './pages/Products/Detail';
 import { SitesList } from './pages/Sites/List';
+import { ImportExportPage } from './pages/ImportExport';
 import { UsersPage } from './pages/Users';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/products" element={<ProductsList />} />
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/sites" element={<SitesList />} />
+          <Route path="/import-export" element={<ImportExportPage />} />
           <Route
             path="/users"
             element={

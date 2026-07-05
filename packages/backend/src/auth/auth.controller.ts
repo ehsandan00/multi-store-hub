@@ -1,7 +1,6 @@
 import { ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength } from 'class-validator';
-import { Controller, Post, Get, Body, Req, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService, type LoginResult } from './auth.service';
@@ -46,7 +45,6 @@ export class AuthController {
     return this.auth.refresh(dto.refreshToken);
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Get('me')
   me(@Req() req: { user: AuthenticatedUser }): AuthenticatedUser {
     return req.user;

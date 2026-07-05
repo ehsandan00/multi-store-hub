@@ -2,10 +2,10 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { hash } from 'bcrypt';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthService } from '../auth/auth.service';
 import type { CreateUserDto, UpdateUserDto } from './users.dto';
 
 const SALT_ROUNDS = 12;
+const MIN_PASSWORD_LENGTH = 8;
 
 export interface SafeUser {
   id: string;
@@ -25,10 +25,7 @@ function toSafe(u: any): SafeUser {
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly auth: AuthService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async list(): Promise<SafeUser[]> {
     const users = await this.prisma.user.findMany({ orderBy: { createdAt: 'desc' } });
@@ -72,9 +69,13 @@ export class UsersService {
   }
 
   async changePassword(id: string, newPassword: string): Promise<void> {
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      throw new ConflictException(`Password must be ≥ ${MIN_PASSWORD_LENGTH} characters`);
+    }
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
-    await this.auth.setPassword(id, newPassword);
+    const passwordHash = await hash(newPassword, SALT_ROUNDS);
+    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
   }
 
   async remove(id: string): Promise<void> {

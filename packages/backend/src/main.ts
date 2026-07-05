@@ -53,7 +53,8 @@ async function bootstrap() {
     .setTitle('Multi-Store Hub API')
     .setDescription(
       'Centralized hub for managing products, inventory, and orders across 8 WooCommerce stores. ' +
-        'Phase 1: auth + RBAC, products, sites, test-connection.',
+        'Phase 1: auth + RBAC, products, sites, test-connection. ' +
+        'Phase 2: Excel import/export with preview + BullMQ-queued commits.',
     )
     .setVersion('0.1.0')
     .addBearerAuth(

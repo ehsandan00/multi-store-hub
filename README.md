@@ -2,7 +2,7 @@
 
 A centralized hub for managing products, warehouse inventory, and orders across 8 independent WooCommerce stores, with a future-proof path to a full CRM.
 
-> **Status: Phase 1 (Core) implemented.** Phases 2–6 are scaffolded in the data model but not yet wired.
+> **Status: Phase 2 (Excel import/export) implemented.** Phases 3–6 are scaffolded in the data model but not yet wired.
 
 ## Tech Stack
 
@@ -13,7 +13,7 @@ A centralized hub for managing products, warehouse inventory, and orders across 
 | Auth         | JWT (access + refresh), bcrypt, role-based access control (RBAC)  |
 | HTTP / proxy | `undici` with per-route proxy, timeout & retry                    |
 | API docs     | Swagger / OpenAPI auto-generated via `@nestjs/swagger`            |
-| Queue        | BullMQ on Redis (reserved — wired in Phase 2)                     |
+| Queue        | BullMQ on Redis (wired in Phase 2 for import commits)             |
 | Frontend     | React 18 + TypeScript + Vite + Tailwind CSS + TanStack Query      |
 | Pkg manager  | pnpm workspaces                                                   |
 
@@ -91,12 +91,24 @@ pnpm dev
 - Audit log captures site-settings changes, product deletion, and user role changes.
 - Unit tests pass (`pnpm test`); typecheck clean (`pnpm typecheck`).
 
+## Phase 2 Acceptance
+
+- `GET /import-export/products.xlsx` — full hub export (Products + SiteMapping sheets), filterable by category / site / stock range.
+- `GET /import-export/woo-commerce.csv?wooCommerceForSiteId=…` — WooCommerce-import-ready CSV per site (SKU uses the site mapping when present, else hub `sku_master`).
+- `POST /import-export/import/preview` (multipart `file`) — parses + validates an xlsx **without writing**, returns a preview keyed by `sku_master` (new/update/error counts + per-row errors).
+- `POST /import-export/import/:jobId/commit` — enqueues a BullMQ job that applies the validated rows; per-row failures don't abort the whole import. Inventory logs are written for stock changes (`IMPORT` reason).
+- `POST /import-export/import/:jobId/cancel` — dismiss a preview without applying.
+- `GET /import-export/import/:jobId` and `GET /import-export/import` — status + history (paginated).
+- Admin panel: Import / Export page with export filters, WooCommerce CSV download, upload → preview → confirm → live progress → final report, plus a recent-jobs table. Role-gated (import = admin + warehouse; full export = all roles).
+- Matching is by `sku_master`, not row position — reordering rows is safe. Round-trip (export → re-import) is lossless: the parser recognizes the exact underscore headers the export emits.
+- Unit tests pass (`pnpm test`); typecheck clean (`pnpm typecheck`).
+
 ## Phase Roadmap
 
 | Phase | Scope                                                           | Status        |
 | ----- | --------------------------------------------------------------- | ------------- |
 | 1     | Core data model, auth + RBAC, products, sites, test-connection  | ✅ Done       |
-| 2     | Excel import/export with preview (BullMQ)                       | ⏳ Planned    |
+| 2     | Excel import/export with preview (BullMQ)                       | ✅ Done       |
 | 3     | WooCommerce sync (hub → site), polling, idempotent              | ⏳ Planned    |
 | 4     | AI matching (fuzzball + Anthropic Claude)                       | ⏳ Planned    |
 | 5     | Order & customer pull from sites                                | ⏳ Planned    |

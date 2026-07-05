@@ -1,34 +1,39 @@
 import {
-  CanActivate,
   ExecutionContext,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 /**
- * Default global guard. Validates a JWT on every request, EXCEPT routes
- * decorated with @Public(). Populates request.user = { id, email, role }.
+ * Default global guard. For non-@Public() routes, delegates to Passport's
+ * 'jwt' strategy (which verifies the access token and populates request.user =
+ * { id, email, role }). @Public() routes skip authentication entirely.
  *
- * The actual JWT verification is delegated to Passport's jwt strategy via
- * @nestjs/passport (AuthModule). This guard just opts out for @Public().
+ * Extending AuthGuard('jwt') is what actually triggers the Passport strategy;
+ * a bare CanActivate would never populate request.user.
  */
 @Injectable()
-export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private readonly reflector: Reflector) {
+    super();
+  }
 
-  canActivate(context: ExecutionContext): boolean {
+  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
     if (isPublic) return true;
+    return super.canActivate(context) as boolean | Promise<boolean>;
+  }
 
-    const req = context.switchToHttp().getRequest();
-    if (!req.user) {
+  handleRequest<T = any>(err: unknown, user: any): T {
+    if (err || !user) {
       throw new UnauthorizedException('Authentication required');
     }
-    return true;
+    return user;
   }
 }
