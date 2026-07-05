@@ -42,6 +42,7 @@
     "class-validator": "^0.14.1",
     "exceljs": "^4",
     "express": "^4.22.1",
+    "fuzzball": "^2.2.6",
     "helmet": "^8.0.0",
     "ioredis": "^5",
     "multer": "^1",

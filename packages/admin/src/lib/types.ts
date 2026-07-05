@@ -446,3 +446,50 @@ export interface EnqueuePullResult {
   status: SyncJobStatus;
   queued: boolean;
 }
+
+// ─── Matching (Phase 5: AI product matching) ────────────────────────────────
+
+export type MatchStatus = 'PENDING_REVIEW' | 'APPROVED' | 'MANUAL';
+
+export interface MappingSuggestionRow {
+  id: string;
+  productId: string;
+  siteId: string;
+  siteSku: string | null;
+  siteProductId: string | null;
+  siteSpecificTitle: string | null;
+  matchConfidence: number | null;
+  matchAiReasoning: string | null;
+  matchStatus: MatchStatus;
+  product: { skuMaster: string; name: string };
+  site: { name: string };
+}
+
+export interface PaginatedMappingSuggestions {
+  data: MappingSuggestionRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface MatchingPreview {
+  jobId: string;
+  fileName: string;
+  status: string;
+  totalRows: number;
+  suggestedCount: number;
+  reviewCount: number;
+  rejectedCount: number;
+  aiReviewCount: number;
+  errors: { row: number; message: string }[];
+  suggestions: {
+    row: number;
+    siteTitle: string;
+    skuMaster: string;
+    hubName: string;
+    matchConfidence: number;
+    tier: string;
+    matchAiReasoning?: string;
+    mappingId?: string;
+  }[];
+}

@@ -32,6 +32,9 @@ import type {
   PaginatedOrders,
   ListOrdersQuery,
   DashboardSummary,
+  MatchingPreview,
+  PaginatedMappingSuggestions,
+  MatchStatus,
 } from './types';
 import { useAuthStore } from './auth-store';
 
@@ -270,6 +273,36 @@ export const ordersApi = {
 
 export const dashboardApi = {
   summary: () => api.get<DashboardSummary>('/dashboard/summary').then((r) => r.data),
+};
+
+// ─── Matching (Phase 5) ─────────────────────────────────────────────────────
+
+export const matchingApi = {
+  analyze: (siteId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post<MatchingPreview>(`/matching/sites/${siteId}/analyze`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+
+  listSuggestions: (q: { siteId?: string; status?: MatchStatus; page?: number; pageSize?: number } = {}) =>
+    api
+      .get<PaginatedMappingSuggestions>('/matching/suggestions', { params: q })
+      .then((r) => r.data),
+
+  approve: (id: string) => api.post<void>(`/matching/suggestions/${id}/approve`).then((r) => r.data),
+
+  reject: (id: string) => api.post<void>(`/matching/suggestions/${id}/reject`).then((r) => r.data),
+
+  bulkApprove: (siteId?: string) =>
+    api
+      .post<{ approved: number }>('/matching/suggestions/bulk-approve', null, {
+        params: siteId ? { siteId } : {},
+      })
+      .then((r) => r.data),
 };
 
 function buildExportFileName(filters: ExportFilters): string {

@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { to: '/import-export', label: 'Import / Export', icon: '🗂️' },
   { to: '/sync', label: 'Sync', icon: '🔄' },
   { to: '/orders', label: 'Orders', icon: '🧾' },
+  { to: '/matching', label: 'Matching', icon: '🔗', roles: ['ADMIN', 'WAREHOUSE_STAFF'] },
   { to: '/users', label: 'Users & Roles', icon: '👥', roles: ['ADMIN'] },
 ];
 
@@ -106,7 +107,7 @@ export function Layout() {
           </div>
           <div className="leading-tight">
             <p className="text-sm font-semibold text-slate-900">Multi-Store Hub</p>
-            <p className="text-[11px] text-slate-500">Phase 4 · Orders</p>
+            <p className="text-[11px] text-slate-500">Phase 5 · Matching</p>
           </div>
         </div>
         {navList}

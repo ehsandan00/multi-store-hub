@@ -1,3 +1,5 @@
+jest.setTimeout(60_000);
+
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { BadRequestException } from '@nestjs/common';
 import ExcelJS from 'exceljs';

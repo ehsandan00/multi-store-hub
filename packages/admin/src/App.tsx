@@ -13,6 +13,7 @@ import { SitesList } from './pages/Sites/List';
 import { ImportExportPage } from './pages/ImportExport';
 import { SyncPage } from './pages/Sync';
 import { OrdersList } from './pages/Orders/List';
+import { MatchingPage } from './pages/Matching';
 import { UsersPage } from './pages/Users';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
@@ -71,6 +72,14 @@ export default function App() {
           <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/orders" element={<OrdersList />} />
+          <Route
+            path="/matching"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'WAREHOUSE_STAFF', 'VIEWER']}>
+                <MatchingPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/users"
             element={

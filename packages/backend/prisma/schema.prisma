@@ -58,6 +58,14 @@ enum SyncDirection {
   PULL // site → hub (orders, Phase 4)
 }
 
+enum MatchingJobStatus {
+  PREVIEW // parsed + scored; suggestions written as PENDING_REVIEW
+  PROCESSING // worker running AI review batch
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 // ─── Auth & users ─────────────────────────────────────────────────────────
 
 model User {
@@ -74,6 +82,7 @@ model User {
   auditLogs     AuditLog[]
   importJobs    ImportJob[]
   syncJobs      SyncJob[]
+  matchingJobs  MatchingJob[]
 
   @@index([role])
 }
@@ -167,6 +176,7 @@ model SiteConfig {
   customers     Customer[]
   syncLogs      SyncLog[]
   syncJobs      SyncJob[]
+  matchingJobs  MatchingJob[]
   inventoryLogs InventoryLog[]
 
   @@index([isActive])
@@ -199,6 +209,7 @@ model SiteProductMapping {
   siteProductId     String?
   siteSpecificTitle String?
   matchConfidence   Float?
+  matchAiReasoning  String?     @db.Text
   matchStatus       MatchStatus @default(MANUAL)
   lastSyncedAt      DateTime?
   createdAt         DateTime    @default(now())
@@ -315,6 +326,33 @@ model ImportJob {
   @@index([status])
   @@index([createdAt])
   @@index([createdByUserId])
+}
+
+// ─── Matching jobs (Phase 5: AI product matching) ───────────────────────────
+
+model MatchingJob {
+  id              String            @id @default(uuid())
+  siteId          String
+  status          MatchingJobStatus @default(PREVIEW)
+  fileName        String
+  totalRows       Int               @default(0)
+  suggestedCount  Int               @default(0)
+  rejectedCount   Int               @default(0)
+  reviewCount     Int               @default(0)
+  aiReviewCount   Int               @default(0)
+  errors          Json?
+  report          Json?
+  createdByUserId String?
+  createdAt       DateTime          @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  site SiteConfig @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([siteId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ─── Sync jobs (Phase 3: WooCommerce sync, hub → site) ──────────────────────

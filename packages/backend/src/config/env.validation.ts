@@ -35,6 +35,12 @@ export const envSchema = z.object({
 
   REDIS_URL: z.string().url().or(z.literal('')).default(''),
   ANTHROPIC_API_KEY: z.string().default(''),
+
+  // Phase 5: AI product matching thresholds (0–100)
+  MATCH_FUZZY_DEFINITE: z.coerce.number().min(0).max(100).default(90),
+  MATCH_FUZZY_REJECT: z.coerce.number().min(0).max(100).default(50),
+  MATCH_BULK_APPROVE: z.coerce.number().min(0).max(100).default(95),
+  MATCH_CLAUDE_MODEL: z.string().default('claude-3-5-haiku-20241022'),
 });
 
 export type Environment = z.infer<typeof envSchema>;

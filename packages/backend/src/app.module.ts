@@ -13,6 +13,7 @@ import { ImportExportModule } from './import-export/import-export.module';
 import { SyncModule } from './sync/sync.module';
 import { OrdersModule } from './orders/orders.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { MatchingModule } from './matching/matching.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envSchema } from './config/env.validation';
 
@@ -43,6 +44,7 @@ import { envSchema } from './config/env.validation';
     SyncModule,
     OrdersModule,
     DashboardModule,
+    MatchingModule,
   ],
   providers: [
     // JwtAuthGuard as default global guard; controllers can opt out with @Public()

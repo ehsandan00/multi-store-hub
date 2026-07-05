@@ -2,7 +2,7 @@
 
 A centralized hub for managing products, warehouse inventory, and orders across 8 independent WooCommerce stores, with a future-proof path to a full CRM.
 
-> **Status: Phase 2 (Excel import/export) implemented.** Phases 3–6 are scaffolded in the data model but not yet wired.
+> **Status: Phase 5 (AI product matching) implemented.** Phase 6 (full reporting) remains planned.
 
 ## Tech Stack
 
@@ -107,12 +107,12 @@ pnpm dev
 
 | Phase | Scope                                                           | Status        |
 | ----- | --------------------------------------------------------------- | ------------- |
-| 1     | Core data model, auth + RBAC, products, sites, test-connection  | ✅ Done       |
-| 2     | Excel import/export with preview (BullMQ)                       | ✅ Done       |
-| 3     | WooCommerce sync (hub → site), polling, idempotent              | ⏳ Planned    |
-| 4     | AI matching (fuzzball + Anthropic Claude)                       | ⏳ Planned    |
-| 5     | Order & customer pull from sites                                | ⏳ Planned    |
-| 6     | Reporting module + full dashboard KPIs                          | ⏳ Planned    |
+| 1     | Core data model, auth + RBAC, products, sites, test-connection  | Done          |
+| 2     | Excel import/export with preview (BullMQ)                       | Done          |
+| 3     | WooCommerce sync (hub → site), polling, idempotent              | Done          |
+| 4     | Order pull + cross-store orders + dashboard KPIs                | Done          |
+| 5     | AI product matching (fuzzball + optional Claude) + review UI    | Done          |
+| 6     | Reporting module + full dashboard KPIs                          | Planned       |
 
 ## Security Notes
 
