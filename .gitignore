@@ -7,6 +7,9 @@ dist/
 build/
 .next/
 *.tsbuildinfo
+# Stray compiled Vite config artifacts (vite.config.ts is the source)
+packages/admin/vite.config.js
+packages/admin/vite.config.d.ts
 
 # Environment & secrets
 .env
