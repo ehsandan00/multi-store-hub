@@ -20,6 +20,8 @@ const sampleSite: SafeSite = {
   syncEnabled: false,
   syncIntervalMs: 600_000,
   lastSyncAt: null,
+  orderPullEnabled: false,
+  lastOrderPullAt: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };

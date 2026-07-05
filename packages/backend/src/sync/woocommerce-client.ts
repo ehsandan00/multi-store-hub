@@ -3,8 +3,14 @@ import { HttpProxyService, type ProxyResponse } from '../http-proxy/http-proxy.s
 import { HttpProxyError, type NetworkRoute } from '../http-proxy/http-proxy.error';
 import { decrypt } from '../config/crypto.util';
 import { PrismaService } from '../prisma/prisma.service';
-import type { WcProductPayload, WcProductRemote } from './sync.types';
-import { SYNC_DEFAULT_CONCURRENCY, SYNC_DEFAULT_MIN_INTERVAL_MS, WC_API_PREFIX, WC_LOOKUP_PAGE_SIZE } from './sync.types';
+import type { WcProductPayload, WcProductRemote, WcOrderRemote } from './sync.types';
+import {
+  SYNC_DEFAULT_CONCURRENCY,
+  SYNC_DEFAULT_MIN_INTERVAL_MS,
+  WC_API_PREFIX,
+  WC_LOOKUP_PAGE_SIZE,
+  WC_ORDERS_PAGE_SIZE,
+} from './sync.types';
 
 /**
  * Thin WooCommerce REST API v3 client built on top of HttpProxyService.
@@ -114,6 +120,54 @@ export class WooCommerceClient {
     }
     const remote = await this.createProduct(siteId, payload);
     return { remote, created: true };
+  }
+
+  // ─── Phase 4: orders (site → hub pull) ─────────────────────────────────────
+
+  /**
+   * Lists a single page of orders from a site, optionally filtered to those
+   * modified after `modifiedAfter` (ISO 8601) for incremental pulls. The
+   * caller paginates until a page returns fewer than `perPage` results (WC's
+   * signal that the last page has been reached). WC caps `per_page` at 100.
+   *
+   * Results are ordered by `date_modified` ascending so the incremental cursor
+   * advances monotonically — the newest `date_modified` seen this run becomes
+   * the next `modifiedAfter` cursor, and ascending order guarantees we never
+   * skip an order that gets modified mid-pull.
+   */
+  async listOrders(
+    siteId: string,
+    params: { modifiedAfter?: Date; page?: number; perPage?: number; status?: string } = {},
+  ): Promise<WcOrderRemote[]> {
+    const creds = await this.loadCredentials(siteId);
+    const page = Math.max(1, params.page ?? 1);
+    const perPage = Math.min(100, Math.max(1, params.perPage ?? WC_ORDERS_PAGE_SIZE));
+    const qs = new URLSearchParams();
+    qs.set('per_page', String(perPage));
+    qs.set('page', String(page));
+    qs.set('orderby', 'date_modified');
+    qs.set('order', 'asc');
+    if (params.modifiedAfter) {
+      qs.set('modified_after', params.modifiedAfter.toISOString());
+    }
+    if (params.status && params.status !== 'any') {
+      qs.set('status', params.status);
+    }
+    const res = await this.dispatch<WcOrderRemote[]>(siteId, creds, {
+      method: 'GET',
+      path: `${WC_API_PREFIX}/orders?${qs.toString()}`,
+    });
+    return Array.isArray(res.body) ? res.body : [];
+  }
+
+  /** Fetches a single WC order by its remote id. */
+  async getOrder(siteId: string, remoteId: number): Promise<WcOrderRemote> {
+    const creds = await this.loadCredentials(siteId);
+    const res = await this.dispatch<WcOrderRemote>(siteId, creds, {
+      method: 'GET',
+      path: `${WC_API_PREFIX}/orders/${remoteId}`,
+    });
+    return res.body;
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────

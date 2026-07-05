@@ -56,7 +56,8 @@ async function bootstrap() {
         'Phase 1: auth + RBAC, products, sites, test-connection. ' +
         'Phase 2: Excel import/export with preview + BullMQ-queued commits. ' +
         'Phase 3: WooCommerce product sync (hub -> site) with idempotent upserts, ' +
-        'per-site rate limiting, scheduled syncs, and sync job/log history.',
+        'per-site rate limiting, scheduled syncs, and sync job/log history. ' +
+        'Phase 4: order pull (site -> hub), cross-store orders API, dashboard analytics.',
     )
     .setVersion('0.1.0')
     .addBearerAuth(

@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SyncService } from './sync.service';
+import { OrderPullService } from './order-pull.service';
 import { ListSyncQuery, PushSyncDto, UpdateScheduleDto } from './sync.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Audit } from '../common/decorators/audit.decorator';
@@ -23,7 +24,10 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 @ApiBearerAuth('access-token')
 @Controller('sync')
 export class SyncController {
-  constructor(private readonly sync: SyncService) {}
+  constructor(
+    private readonly sync: SyncService,
+    private readonly orderPull: OrderPullService,
+  ) {}
 
   // ─── Push ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +46,24 @@ export class SyncController {
     @Req() req: { user: AuthenticatedUser },
   ) {
     return this.sync.enqueuePush(siteId, dto.scope ?? 'ALL', dto.productIds, req.user);
+  }
+
+  // ─── Order pull (Phase 4: site → hub) ─────────────────────────────────────
+
+  @Post('sites/:siteId/pull')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF')
+  @Audit('ORDER_PULL')
+  @UseInterceptors(AuditInterceptor)
+  @ApiOperation({
+    summary:
+      'Enqueue a site→hub order pull (BullMQ). Incremental via lastOrderPullAt cursor. Idempotent by (siteId, remoteOrderId).',
+  })
+  @HttpCode(HttpStatus.ACCEPTED)
+  async pull(
+    @Param('siteId') siteId: string,
+    @Req() req: { user: AuthenticatedUser },
+  ) {
+    return this.orderPull.enqueuePull(siteId, req.user);
   }
 
   // ─── Schedule config ──────────────────────────────────────────────────────

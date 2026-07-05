@@ -20,18 +20,24 @@ export class PushSyncDto {
 }
 
 export class UpdateScheduleDto {
-  @ApiPropertyOptional({ description: 'Enable/disable scheduled sync for this site' })
+  @ApiPropertyOptional({ description: 'Enable/disable scheduled product push sync for this site' })
   @IsOptional()
   syncEnabled?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Sync interval in milliseconds (60000 – 86400000)',
+    description: 'Sync interval in milliseconds (60000 – 86400000). Applies to both push and order pull.',
     example: 600000,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   syncIntervalMs?: number;
+
+  @ApiPropertyOptional({
+    description: 'Enable/disable scheduled order pull (site → hub) for this site',
+  })
+  @IsOptional()
+  orderPullEnabled?: boolean;
 }
 
 export class ListSyncQuery {

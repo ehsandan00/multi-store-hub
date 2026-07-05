@@ -22,11 +22,16 @@ import type {
   ExportFilters,
   SyncScope,
   EnqueuePushResult,
+  EnqueuePullResult,
   UpdateSchedulePayload,
   UpdateScheduleResult,
   SyncJob,
   PaginatedSyncJobs,
   PaginatedSyncLogs,
+  OrderDetail,
+  PaginatedOrders,
+  ListOrdersQuery,
+  DashboardSummary,
 } from './types';
 import { useAuthStore } from './auth-store';
 
@@ -230,6 +235,11 @@ export const syncApi = {
       .post<EnqueuePushResult>(`/sync/sites/${siteId}/push`, payload)
       .then((r) => r.data),
 
+  pull: (siteId: string) =>
+    api
+      .post<EnqueuePullResult>(`/sync/sites/${siteId}/pull`)
+      .then((r) => r.data),
+
   updateSchedule: (siteId: string, payload: UpdateSchedulePayload) =>
     api.patch<UpdateScheduleResult>(`/sync/sites/${siteId}/schedule`, payload).then((r) => r.data),
 
@@ -244,6 +254,22 @@ export const syncApi = {
     api
       .get<PaginatedSyncLogs>('/sync/logs', { params: q })
       .then((r) => r.data),
+};
+
+// ─── Orders (Phase 4) ─────────────────────────────────────────────────────────
+
+export const ordersApi = {
+  list: (q: ListOrdersQuery = {}) =>
+    api
+      .get<PaginatedOrders>('/orders', { params: q })
+      .then((r) => r.data),
+  get: (id: string) => api.get<OrderDetail>(`/orders/${id}`).then((r) => r.data),
+};
+
+// ─── Dashboard (Phase 4) ──────────────────────────────────────────────────────
+
+export const dashboardApi = {
+  summary: () => api.get<DashboardSummary>('/dashboard/summary').then((r) => r.data),
 };
 
 function buildExportFileName(filters: ExportFilters): string {

@@ -95,6 +95,8 @@ export interface SafeSite {
   syncEnabled: boolean;
   syncIntervalMs: number;
   lastSyncAt: string | null;
+  orderPullEnabled: boolean;
+  lastOrderPullAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -310,9 +312,137 @@ export interface EnqueuePushResult {
 export interface UpdateSchedulePayload {
   syncEnabled?: boolean;
   syncIntervalMs?: number;
+  orderPullEnabled?: boolean;
 }
 
 export interface UpdateScheduleResult {
   syncEnabled: boolean;
   syncIntervalMs: number;
+  orderPullEnabled: boolean;
+}
+
+// ─── Orders (Phase 4: aggregated order book) ────────────────────────────────
+
+export interface OrderRow {
+  id: string;
+  orderNumber: string;
+  siteId: string;
+  customerId: string | null;
+  status: string;
+  totalAmount: string;
+  remoteOrderId: number | null;
+  dateCreated: string | null;
+  dateModified: string | null;
+  currency: string | null;
+  paymentMethod: string | null;
+  discountTotal: string;
+  shippingTotal: string;
+  billingName: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+  site?: { id: string; name: string } | null;
+  customer?: { id: string; name: string; email: string | null } | null;
+}
+
+export interface OrderItemRow {
+  id: string;
+  orderId: string;
+  productId: string | null;
+  quantity: number;
+  unitPrice: string;
+  remoteLineId: string | null;
+  siteSku: string | null;
+  lineName: string | null;
+  product?: { id: string; skuMaster: string; name: string } | null;
+}
+
+export interface OrderDetail extends OrderRow {
+  items: OrderItemRow[];
+  site?: { id: string; name: string; baseUrl: string } | null;
+  customer?: { id: string; name: string; email: string | null; phone: string | null } | null;
+}
+
+export interface PaginatedOrders {
+  data: OrderRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface ListOrdersQuery {
+  siteId?: string;
+  status?: string;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+// ─── Dashboard (Phase 4: backend-aggregated summary) ────────────────────────
+
+export interface DashboardKpis {
+  totalProducts: number;
+  lowStockCount: number;
+  totalSites: number;
+  activeSites: number;
+  totalOrders: number;
+  ordersLast30d: number;
+}
+
+export interface RevenueSeriesPoint {
+  day: string;
+  revenue: string;
+  orders: number;
+}
+
+export interface StatusBreakdownPoint {
+  status: string;
+  count: number;
+}
+
+export interface TopProductPoint {
+  productId: string | null;
+  skuMaster: string | null;
+  name: string | null;
+  quantity: number;
+  revenue: string;
+}
+
+export interface LowStockProduct {
+  id: string;
+  skuMaster: string;
+  name: string;
+  totalStock: number;
+  lowStockThreshold: number;
+  category: string | null;
+}
+
+export interface RecentOrderPoint {
+  id: string;
+  orderNumber: string;
+  siteId: string;
+  siteName: string;
+  status: string;
+  totalAmount: string;
+  dateCreated: string;
+}
+
+export interface DashboardSummary {
+  kpis: DashboardKpis;
+  revenueSeries: RevenueSeriesPoint[];
+  statusBreakdown: StatusBreakdownPoint[];
+  topProducts: TopProductPoint[];
+  lowStockProducts: LowStockProduct[];
+  recentOrders: RecentOrderPoint[];
+  since: string;
+}
+
+export interface EnqueuePullResult {
+  id: string;
+  status: SyncJobStatus;
+  queued: boolean;
 }

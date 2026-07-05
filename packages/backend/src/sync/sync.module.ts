@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { SyncService } from './sync.service';
+import { OrderPullService } from './order-pull.service';
 import { SyncController } from './sync.controller';
 import { SyncProcessor } from './sync.processor';
 import { SyncScheduler } from './sync.scheduler';
@@ -11,11 +12,11 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
 import { SYNC_QUEUE_NAME } from './sync.types';
 
 /**
- * WooCommerce sync module (Phase 3: hub → site push).
+ * WooCommerce sync module (Phase 3 push + Phase 4 order pull).
  *
  * Registers the SYNC_QUEUE against REDIS_URL via BullMQ. The processor hosts
- * both push jobs and the scheduler's per-minute tick. When REDIS_URL is empty
- * (unit tests), the queue registration still succeeds against a default
+ * push jobs, pull jobs, and the scheduler's per-minute tick. When REDIS_URL is
+ * empty (unit tests), the queue registration still succeeds against a default
  * localhost connection — tests inject a mock queue instead of hitting it.
  */
 @Module({
@@ -40,7 +41,7 @@ import { SYNC_QUEUE_NAME } from './sync.types';
     }),
   ],
   controllers: [SyncController],
-  providers: [SyncService, WooCommerceClient, SyncProcessor, SyncScheduler],
-  exports: [SyncService, WooCommerceClient],
+  providers: [SyncService, OrderPullService, WooCommerceClient, SyncProcessor, SyncScheduler],
+  exports: [SyncService, OrderPullService, WooCommerceClient],
 })
 export class SyncModule {}

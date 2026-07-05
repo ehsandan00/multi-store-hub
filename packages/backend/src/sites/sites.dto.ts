@@ -81,6 +81,11 @@ export class UpdateSiteDto {
   @IsOptional()
   syncEnabled?: boolean;
 
+  @ApiPropertyOptional({ description: 'Phase 4: enable scheduled order pull (site → hub).' })
+  @IsBoolean()
+  @IsOptional()
+  orderPullEnabled?: boolean;
+
   @ApiPropertyOptional({ description: 'Sync interval in ms (60000 – 86400000).' })
   @IsOptional()
   @Type(() => Number)
@@ -115,6 +120,8 @@ export interface SafeSite {
   syncEnabled: boolean;
   syncIntervalMs: number;
   lastSyncAt: Date | null;
+  orderPullEnabled: boolean;
+  lastOrderPullAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

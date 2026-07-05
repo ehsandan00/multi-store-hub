@@ -459,12 +459,13 @@ export class SyncService {
 
   async updateSiteSchedule(
     siteId: string,
-    input: { syncEnabled?: boolean; syncIntervalMs?: number },
-  ): Promise<{ syncEnabled: boolean; syncIntervalMs: number }> {
+    input: { syncEnabled?: boolean; syncIntervalMs?: number; orderPullEnabled?: boolean },
+  ): Promise<{ syncEnabled: boolean; syncIntervalMs: number; orderPullEnabled: boolean }> {
     const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
     const data: Prisma.SiteConfigUpdateInput = {};
     if (input.syncEnabled !== undefined) data.syncEnabled = input.syncEnabled;
+    if (input.orderPullEnabled !== undefined) data.orderPullEnabled = input.orderPullEnabled;
     if (input.syncIntervalMs !== undefined) {
       if (input.syncIntervalMs < 60_000 || input.syncIntervalMs > 86_400_000) {
         throw new BadRequestException('syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)');
@@ -472,7 +473,11 @@ export class SyncService {
       data.syncIntervalMs = input.syncIntervalMs;
     }
     const updated = await this.prisma.siteConfig.update({ where: { id: siteId }, data });
-    return { syncEnabled: updated.syncEnabled, syncIntervalMs: updated.syncIntervalMs };
+    return {
+      syncEnabled: updated.syncEnabled,
+      syncIntervalMs: updated.syncIntervalMs,
+      orderPullEnabled: updated.orderPullEnabled,
+    };
   }
 }
 

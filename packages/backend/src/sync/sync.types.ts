@@ -93,3 +93,68 @@ export interface ResolvedPushItem {
   siteProductId: string | null;
   siteSpecificTitle: string | null;
 }
+
+// ─── Phase 4: order pull (site → hub) ───────────────────────────────────────
+
+/** WooCommerce REST v3 order line item (subset we persist). */
+export interface WcOrderItemRemote {
+  id: number;
+  name?: string;
+  sku?: string;
+  quantity: number;
+  price?: string;
+  total?: string;
+  product_id?: number;
+}
+
+/** WooCommerce REST v3 billing address (subset). */
+export interface WcBillingRemote {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+}
+
+/** WooCommerce REST v3 order (subset we persist). */
+export interface WcOrderRemote {
+  id: number;
+  number: string;
+  status: string;
+  total: string;
+  total_shipping?: string;
+  discount_total?: string;
+  currency?: string;
+  payment_method?: string;
+  date_created?: string;
+  date_modified?: string;
+  customer_id?: number;
+  billing?: WcBillingRemote;
+  line_items?: WcOrderItemRemote[];
+}
+
+/** Per-order error recorded during a pull. */
+export interface OrderPullItemError {
+  remoteOrderId: number;
+  orderNumber: string;
+  message: string;
+  code?: string;
+  statusCode?: number;
+}
+
+/** Final report for an order-pull sync job. */
+export interface OrderPullReport {
+  pulled: number; // orders fetched from WC
+  created: number; // new orders inserted into the hub
+  updated: number; // existing orders updated
+  failed: number; // orders that failed to upsert
+  errors: OrderPullItemError[];
+  startedAt: string;
+  finishedAt: string;
+  routeUsed: string;
+  /** ISO timestamp of the most recent WC date_modified seen this run; stamped
+   * onto SiteConfig.lastOrderPullAt as the next incremental cursor. */
+  newestDateModified: string | null;
+}
+
+/** Default WC orders page size (WC max is 100). */
+export const WC_ORDERS_PAGE_SIZE = 100;

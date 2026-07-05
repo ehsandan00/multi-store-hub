@@ -11,17 +11,17 @@ import { formatDateTime } from '../lib/utils';
 import type { SafeSite, SyncJob, SyncJobStatus, SyncLogRow, SyncScope } from '../lib/types';
 
 /**
- * Phase 3 sync page.
+ * Phase 3 + Phase 4 sync page.
  *
- * - Per-site card: schedule toggle + interval, "Push products" (enqueues a
- *   BullMQ PUSH sync), last sync timestamp, and a live status pill for the
- *   most recent job.
- * - Sync jobs table: recent pushes with status + report summary (pushed /
- *   created / updated / failed) and an expandable per-item error list.
+ * - Per-site card: schedule toggles + interval, "Push products" and "Pull
+ *   orders" buttons (each enqueues a BullMQ sync job), last sync / last pull
+ *   timestamps, and a live status pill for the most recent job.
+ * - Sync jobs table: recent push + pull jobs with status + report summary and
+ *   an expandable per-item error list.
  * - Sync logs table: the SyncLog audit trail (one row per sync run).
  *
- * VIEWERs can read everything but cannot push or change schedules (the
- * buttons are hidden; the backend enforces RBAC regardless).
+ * VIEWERs can read everything but cannot trigger syncs or change schedules
+ * (the buttons are hidden; the backend enforces RBAC regardless).
  */
 export function SyncPage() {
   const { user } = useAuthStore();
@@ -32,6 +32,7 @@ export function SyncPage() {
 
   const [pushTarget, setPushTarget] = useState<SafeSite | null>(null);
   const [pushScope, setPushScope] = useState<SyncScope>('ALL');
+  const [pullTarget, setPullTarget] = useState<SafeSite | null>(null);
 
   const sitesQ = useQuery({
     queryKey: ['sites', { page: 1, pageSize: 100 }],
@@ -58,9 +59,24 @@ export function SyncPage() {
     onError: (err) => toast.error('Failed to queue sync', toApiError(err).message),
   });
 
+  const pullMut = useMutation({
+    mutationFn: (siteId: string) => syncApi.pull(siteId),
+    onSuccess: (res: { id: string; status: SyncJobStatus; queued: boolean }) => {
+      toast.success('Order pull queued', `Job ${res.id}`);
+      qc.invalidateQueries({ queryKey: ['sync-jobs'] });
+      setPullTarget(null);
+    },
+    onError: (err) => toast.error('Failed to queue order pull', toApiError(err).message),
+  });
+
   const scheduleMut = useMutation({
-    mutationFn: ({ siteId, payload }: { siteId: string; payload: { syncEnabled?: boolean; syncIntervalMs?: number } }) =>
-      syncApi.updateSchedule(siteId, payload),
+    mutationFn: ({
+      siteId,
+      payload,
+    }: {
+      siteId: string;
+      payload: { syncEnabled?: boolean; syncIntervalMs?: number; orderPullEnabled?: boolean };
+    }) => syncApi.updateSchedule(siteId, payload),
     onSuccess: () => {
       toast.success('Schedule updated');
       qc.invalidateQueries({ queryKey: ['sites'] });
@@ -73,7 +89,7 @@ export function SyncPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">WooCommerce Sync</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Push hub products, stock, and prices to each store. Pushes are idempotent (matched by SKU) and
+          Push hub products to each store and pull orders back into the hub. Both are idempotent and
           rate-limited per site. {!canMutate && 'You have read-only access.'}
         </p>
       </div>
@@ -103,8 +119,12 @@ export function SyncPage() {
                 setPushScope('ALL');
                 setPushTarget(s);
               }}
+              onPull={() => setPullTarget(s)}
               onToggleSchedule={(enabled) =>
                 scheduleMut.mutate({ siteId: s.id, payload: { syncEnabled: enabled } })
+              }
+              onToggleOrderPull={(enabled) =>
+                scheduleMut.mutate({ siteId: s.id, payload: { orderPullEnabled: enabled } })
               }
               onIntervalChange={(ms) =>
                 scheduleMut.mutate({ siteId: s.id, payload: { syncIntervalMs: ms } })
@@ -128,9 +148,10 @@ export function SyncPage() {
             <thead>
               <tr>
                 <th>Site</th>
+                <th>Dir</th>
                 <th>Scope</th>
                 <th>Status</th>
-                <th>Pushed</th>
+                <th>Pushed/Pulled</th>
                 <th>Created / Updated</th>
                 <th>Failed</th>
                 <th>Started</th>
@@ -140,7 +161,7 @@ export function SyncPage() {
             <tbody>
               {jobsQ.isLoading && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={9} className="py-8 text-center text-slate-400">
                     <Spinner className="mx-auto h-5 w-5" />
                   </td>
                 </tr>
@@ -150,8 +171,8 @@ export function SyncPage() {
               ))}
               {jobsQ.data && jobsQ.data.data.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
-                    No sync jobs yet. Push to a site to start.
+                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                    No sync jobs yet. Push products or pull orders to start.
                   </td>
                 </tr>
               )}
@@ -160,20 +181,28 @@ export function SyncPage() {
         </div>
         {/* Mobile cards for jobs */}
         <div className="grid grid-cols-1 gap-3 md:hidden">
-          {jobsQ.data?.data.map((j) => (
-            <div key={j.id} className="card p-3">
-              <div className="flex items-center justify-between">
-                <p className="font-medium text-slate-900">{j.site?.name ?? j.siteId}</p>
-                <StatusBadge status={j.status} />
+          {jobsQ.data?.data.map((j) => {
+            const isPull = j.direction === 'PULL';
+            const r = j.report as any;
+            const processed = isPull ? r?.pulled ?? j.pushedCount : r?.pushed ?? j.pushedCount;
+            return (
+              <div key={j.id} className="card p-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-slate-900">{j.site?.name ?? j.siteId}</p>
+                  <div className="flex items-center gap-1.5">
+                    <Badge tone={isPull ? 'blue' : 'gray'}>{j.direction}</Badge>
+                    <StatusBadge status={j.status} />
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {isPull ? 'pulled' : 'pushed'} {processed} · failed {r?.failed ?? j.failedCount}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {j.startedAt ? formatDateTime(j.startedAt) : 'queued'}
+                </p>
               </div>
-              <p className="mt-1 text-xs text-slate-500">
-                pushed {j.report?.pushed ?? j.pushedCount} · failed {j.report?.failed ?? j.failedCount}
-              </p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                {j.startedAt ? formatDateTime(j.startedAt) : 'queued'}
-              </p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -227,6 +256,22 @@ export function SyncPage() {
         onConfirm={() => pushTarget && pushMut.mutate({ siteId: pushTarget.id, scope: pushScope })}
         onCancel={() => setPushTarget(null)}
       />
+
+      <ConfirmDialog
+        open={!!pullTarget}
+        title={`Pull orders from ${pullTarget?.name ?? ''}`}
+        message={
+          <>
+            Enqueue an order pull? This fetches orders modified since the last pull
+            {!pullTarget?.lastOrderPullAt && ' (all orders the first time)'} and upserts them into the hub
+            by remote order id. Existing orders are updated; line items are replaced. Runs in the background via BullMQ.
+          </>
+        }
+        confirmLabel="Queue pull"
+        loading={pullMut.isPending}
+        onConfirm={() => pullTarget && pullMut.mutate(pullTarget.id)}
+        onCancel={() => setPullTarget(null)}
+      />
     </div>
   );
 }
@@ -241,7 +286,9 @@ function SiteSyncCard({
   canSchedule,
   lastJob,
   onPush,
+  onPull,
   onToggleSchedule,
+  onToggleOrderPull,
   onIntervalChange,
   scheduleLoading,
 }: {
@@ -250,7 +297,9 @@ function SiteSyncCard({
   canSchedule: boolean;
   lastJob?: SyncJob;
   onPush: () => void;
+  onPull: () => void;
   onToggleSchedule: (enabled: boolean) => void;
+  onToggleOrderPull: (enabled: boolean) => void;
   onIntervalChange: (ms: number) => void;
   scheduleLoading: boolean;
 }) {
@@ -271,21 +320,34 @@ function SiteSyncCard({
 
       <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Last sync</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">Last push</p>
           <p>{site.lastSyncAt ? formatDateTime(site.lastSyncAt) : 'never'}</p>
         </div>
         <div>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">Last pull</p>
+          <p>{site.lastOrderPullAt ? formatDateTime(site.lastOrderPullAt) : 'never'}</p>
+        </div>
+        <div className="col-span-2">
           <p className="text-[10px] uppercase tracking-wide text-slate-400">Latest job</p>
           <p className="flex items-center gap-1.5">
-            {lastJob ? <StatusBadge status={lastJob.status} /> : <span className="text-slate-400">—</span>}
+            {lastJob ? (
+              <>
+                <Badge tone={lastJob.direction === 'PULL' ? 'blue' : 'gray'}>
+                  {lastJob.direction}
+                </Badge>
+                <StatusBadge status={lastJob.status} />
+              </>
+            ) : (
+              <span className="text-slate-400">—</span>
+            )}
           </p>
         </div>
       </div>
 
-      {/* Schedule controls */}
+      {/* Schedule controls — push */}
       <div className="rounded-lg bg-slate-50 p-2.5 text-xs">
         <div className="flex items-center justify-between">
-          <span className="font-medium text-slate-700">Scheduled sync</span>
+          <span className="font-medium text-slate-700">Scheduled product push</span>
           {canSchedule ? (
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               <input
@@ -303,31 +365,63 @@ function SiteSyncCard({
             <Badge tone={site.syncEnabled ? 'green' : 'gray'}>{site.syncEnabled ? 'enabled' : 'disabled'}</Badge>
           )}
         </div>
-        {canSchedule ? (
-          <div className="mt-2 flex items-center gap-2">
-            <label className="text-slate-500">Interval</label>
-            <select
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-brand-500 focus:ring-brand-500"
-              value={intervalMin}
-              disabled={scheduleLoading}
-              onChange={(e) => onIntervalChange(Number(e.target.value) * 60_000)}
-            >
-              <option value={5}>5 min</option>
-              <option value={10}>10 min</option>
-              <option value={15}>15 min</option>
-              <option value={30}>30 min</option>
-              <option value={60}>1 hour</option>
-            </select>
-          </div>
-        ) : (
-          <p className="mt-1 text-slate-500">Every {intervalMin} min{intervalMin === 1 ? '' : 's'}</p>
-        )}
       </div>
 
+      {/* Schedule controls — order pull */}
+      <div className="rounded-lg bg-slate-50 p-2.5 text-xs">
+        <div className="flex items-center justify-between">
+          <span className="font-medium text-slate-700">Scheduled order pull</span>
+          {canSchedule ? (
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                checked={site.orderPullEnabled}
+                disabled={scheduleLoading}
+                onChange={(e) => onToggleOrderPull(e.target.checked)}
+              />
+              <span className={site.orderPullEnabled ? 'text-emerald-700' : 'text-slate-500'}>
+                {site.orderPullEnabled ? 'On' : 'Off'}
+              </span>
+            </label>
+          ) : (
+            <Badge tone={site.orderPullEnabled ? 'green' : 'gray'}>
+              {site.orderPullEnabled ? 'enabled' : 'disabled'}
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Shared interval */}
+      {canSchedule ? (
+        <div className="-mt-1 flex items-center gap-2 text-xs">
+          <label className="text-slate-500">Interval (push &amp; pull)</label>
+          <select
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-brand-500 focus:ring-brand-500"
+            value={intervalMin}
+            disabled={scheduleLoading}
+            onChange={(e) => onIntervalChange(Number(e.target.value) * 60_000)}
+          >
+            <option value={5}>5 min</option>
+            <option value={10}>10 min</option>
+            <option value={15}>15 min</option>
+            <option value={30}>30 min</option>
+            <option value={60}>1 hour</option>
+          </select>
+        </div>
+      ) : (
+        <p className="-mt-1 text-xs text-slate-500">Every {intervalMin} min{intervalMin === 1 ? '' : 's'} (push &amp; pull)</p>
+      )}
+
       {canMutate && (
-        <Button onClick={onPush} type="button" disabled={!site.isActive}>
-          {!site.isActive ? 'Site inactive' : 'Push products'}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={onPush} type="button" disabled={!site.isActive} className="flex-1">
+            {!site.isActive ? 'Site inactive' : 'Push products'}
+          </Button>
+          <Button onClick={onPull} type="button" disabled={!site.isActive} variant="secondary" className="flex-1">
+            Pull orders
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -336,32 +430,37 @@ function SiteSyncCard({
 function JobRow({ job }: { job: SyncJob }) {
   const [expanded, setExpanded] = useState(false);
   const report = job.report;
-  const errors = job.errors ?? report?.errors ?? [];
+  const errors = job.errors ?? (report as any)?.errors ?? [];
+  const isPull = job.direction === 'PULL';
+  const processed = isPull ? (report as any)?.pulled ?? job.pushedCount : report?.pushed ?? job.pushedCount;
+  const created = isPull ? (report as any)?.created : report?.created;
+  const updated = isPull ? (report as any)?.updated : report?.updated;
   return (
     <>
       <tr className={errors.length ? 'cursor-pointer' : ''} onClick={() => errors.length && setExpanded((v) => !v)}>
         <td className="font-medium text-slate-900">{job.site?.name ?? job.siteId}</td>
+        <td>
+          <Badge tone={isPull ? 'blue' : 'gray'}>{isPull ? 'PULL' : 'PUSH'}</Badge>
+        </td>
         <td>
           <Badge tone="gray">{job.scope}</Badge>
         </td>
         <td>
           <StatusBadge status={job.status} />
         </td>
-        <td>{report?.pushed ?? job.pushedCount}</td>
-        <td>
-          {report ? `${report.created} / ${report.updated}` : '—'}
-        </td>
+        <td>{processed}</td>
+        <td>{report ? `${created ?? 0} / ${updated ?? 0}` : '—'}</td>
         <td className={errors.length ? 'text-rose-600' : ''}>{report?.failed ?? job.failedCount}</td>
         <td className="text-xs text-slate-500">{job.startedAt ? formatDateTime(job.startedAt) : '—'}</td>
         <td className="text-xs text-slate-500">{job.finishedAt ? formatDateTime(job.finishedAt) : '—'}</td>
       </tr>
       {expanded && errors.length > 0 && (
         <tr className="bg-rose-50/40">
-          <td colSpan={8} className="px-4 py-2">
+          <td colSpan={9} className="px-4 py-2">
             <ul className="space-y-1 text-xs text-rose-800">
-              {errors.slice(0, 25).map((e, i) => (
+              {errors.slice(0, 25).map((e: any, i: number) => (
                 <li key={i}>
-                  <span className="font-mono">{e.sku}</span> — {e.message}
+                  <span className="font-mono">{e.sku ?? e.orderNumber ?? e.remoteOrderId}</span> — {e.message}
                   {e.code ? <span className="ml-1 text-rose-500">({e.code})</span> : null}
                 </li>
               ))}

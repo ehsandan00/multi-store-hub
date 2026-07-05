@@ -26,6 +26,8 @@ interface RawSite {
   syncEnabled: boolean;
   syncIntervalMs: number;
   lastSyncAt: Date | null;
+  orderPullEnabled: boolean;
+  lastOrderPullAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +54,8 @@ function toSafe(s: RawSite): SafeSite {
     syncEnabled: s.syncEnabled,
     syncIntervalMs: s.syncIntervalMs,
     lastSyncAt: s.lastSyncAt,
+    orderPullEnabled: s.orderPullEnabled,
+    lastOrderPullAt: s.lastOrderPullAt,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };
@@ -111,6 +115,7 @@ export class SitesService {
     if (dto.networkRoute !== undefined) data.networkRoute = dto.networkRoute;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.syncEnabled !== undefined) data.syncEnabled = dto.syncEnabled;
+    if (dto.orderPullEnabled !== undefined) data.orderPullEnabled = dto.orderPullEnabled;
     if (dto.syncIntervalMs !== undefined) {
       if (dto.syncIntervalMs < 60_000 || dto.syncIntervalMs > 86_400_000) {
         throw new BadRequestException('syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)');

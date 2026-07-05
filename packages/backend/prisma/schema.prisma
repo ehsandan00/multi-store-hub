@@ -55,7 +55,7 @@ enum SyncJobStatus {
 
 enum SyncDirection {
   PUSH // hub → site
-  PULL // site → hub (orders/inventory, Phase 5)
+  PULL // site → hub (orders, Phase 4)
 }
 
 // ─── Auth & users ─────────────────────────────────────────────────────────
@@ -154,6 +154,11 @@ model SiteConfig {
   syncEnabled             Boolean      @default(false)
   syncIntervalMs          Int          @default(600000) // 10 min default
   lastSyncAt              DateTime?
+  // Phase 4: scheduled order-pull config. The scheduler enqueues a PULL sync
+  // for every site with orderPullEnabled=true when lastOrderPullAt is older
+  // than syncIntervalMs. Manual pulls bypass these.
+  orderPullEnabled        Boolean      @default(false)
+  lastOrderPullAt         DateTime?
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
 
@@ -166,6 +171,7 @@ model SiteConfig {
 
   @@index([isActive])
   @@index([syncEnabled])
+  @@index([orderPullEnabled])
 }
 
 model SyncLog {
@@ -212,6 +218,7 @@ model Customer {
   phone            String?
   email            String?
   siteId           String?
+  remoteCustomerId Int?
   totalOrdersCount Int      @default(0)
   totalSpent       Decimal  @default(0) @db.Decimal(12, 2)
   notes            String?
@@ -220,41 +227,60 @@ model Customer {
   site   SiteConfig? @relation(fields: [siteId], references: [id], onDelete: SetNull)
   orders Order[]
 
+  @@unique([siteId, remoteCustomerId])
   @@index([siteId])
   @@index([phone])
+  @@index([email])
 }
 
 model Order {
-  id          String   @id @default(uuid())
-  orderNumber String
-  siteId      String
-  customerId  String?
-  status      String   @default("pending")
-  totalAmount Decimal  @db.Decimal(12, 2)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String    @id @default(uuid())
+  orderNumber   String
+  siteId        String
+  customerId    String?
+  status        String    @default("pending")
+  totalAmount   Decimal   @db.Decimal(12, 2)
+  // Phase 4: WooCommerce remote linkage + pull metadata
+  remoteOrderId Int?
+  dateCreated   DateTime?
+  dateModified  DateTime?
+  currency      String?
+  paymentMethod String?
+  discountTotal Decimal   @default(0) @db.Decimal(12, 2)
+  shippingTotal Decimal   @default(0) @db.Decimal(12, 2)
+  billingName   String?
+  billingEmail  String?
+  billingPhone  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   site     SiteConfig  @relation(fields: [siteId], references: [id], onDelete: Cascade)
   customer Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items    OrderItem[]
 
+  @@unique([siteId, remoteOrderId])
   @@index([siteId])
   @@index([createdAt])
+  @@index([dateCreated])
   @@index([status])
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
-  orderId   String
-  productId String?
-  quantity  Int
-  unitPrice Decimal @db.Decimal(12, 2)
+  id           String  @id @default(uuid())
+  orderId      String
+  productId    String?
+  quantity     Int
+  unitPrice    Decimal @db.Decimal(12, 2)
+  remoteLineId String?
+  siteSku      String?
+  lineName     String?
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([productId])
+  @@index([siteSku])
 }
 
 // ─── Import jobs (Phase 2: Excel import/export) ────────────────────────────

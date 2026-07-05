@@ -20,6 +20,8 @@ const site: SafeSite = {
   syncEnabled: false,
   syncIntervalMs: 600_000,
   lastSyncAt: null,
+  orderPullEnabled: false,
+  lastOrderPullAt: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -110,15 +112,16 @@ describe('Sync page', () => {
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
-    // Schedule section
-    expect(screen.getByText('Scheduled sync')).toBeInTheDocument();
+    // Schedule sections (push + pull)
+    expect(screen.getByText('Scheduled product push')).toBeInTheDocument();
+    expect(screen.getByText('Scheduled order pull')).toBeInTheDocument();
     // Jobs table — latest job shows pushed/failed (2 pushed)
     await waitFor(() => expect(screen.getByText('2')).toBeInTheDocument());
     // Sync log table
     expect(screen.getByText('product_push')).toBeInTheDocument();
   });
 
-  it('hides the Push button and schedule controls for VIEWERs (read-only)', async () => {
+  it('hides the Push/Pull buttons and schedule controls for VIEWERs (read-only)', async () => {
     useAuthStore.setState({
       user: { id: 'u3', email: 'viewer@hub.local', role: 'VIEWER' },
       accessToken: 'tok',
@@ -129,8 +132,9 @@ describe('Sync page', () => {
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
     expect(screen.queryByRole('button', { name: /push products/i })).not.toBeInTheDocument();
-    // Viewer sees the schedule state as a badge, not a checkbox.
-    expect(screen.getByText('disabled')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pull orders/i })).not.toBeInTheDocument();
+    // Viewer sees both schedule states as badges (disabled).
+    expect(screen.getAllByText('disabled').length).toBeGreaterThanOrEqual(1);
   });
 
   it('enqueues a push on confirm and shows a success toast', async () => {
@@ -150,16 +154,33 @@ describe('Sync page', () => {
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('s1', { scope: 'ALL' }));
   });
 
-  it('toggles scheduled sync on for the site', async () => {
+  it('toggles scheduled product push on for the site', async () => {
     const user = userEvent.setup();
     const schedSpy = vi
       .spyOn(apiModule.syncApi, 'updateSchedule')
-      .mockResolvedValue({ syncEnabled: true, syncIntervalMs: 600_000 });
+      .mockResolvedValue({ syncEnabled: true, syncIntervalMs: 600_000, orderPullEnabled: false });
 
     renderPage();
-    await waitFor(() => expect(screen.getByText('Scheduled sync')).toBeInTheDocument());
-    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
-    await user.click(checkbox);
+    await waitFor(() => expect(screen.getByText('Scheduled product push')).toBeInTheDocument());
+    // The first checkbox is the product-push toggle (it appears before the order-pull one).
+    const checkboxes = screen.getAllByRole('checkbox');
+    await user.click(checkboxes[0]);
     await waitFor(() => expect(schedSpy).toHaveBeenCalledWith('s1', { syncEnabled: true }));
+  });
+
+  it('enqueues an order pull on confirm', async () => {
+    const user = userEvent.setup();
+    const pullSpy = vi
+      .spyOn(apiModule.syncApi, 'pull')
+      .mockResolvedValue({ id: 'sj-pull', status: 'QUEUED', queued: true });
+
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
+    );
+    await user.click(screen.getByRole('button', { name: /pull orders/i }));
+    await waitFor(() => expect(screen.getByText(/Queue pull/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Queue pull/i }));
+    await waitFor(() => expect(pullSpy).toHaveBeenCalledWith('s1'));
   });
 });

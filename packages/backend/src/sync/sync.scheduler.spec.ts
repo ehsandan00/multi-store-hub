@@ -16,12 +16,23 @@ function fakePrismaWithSite(site: any) {
   return {
     siteConfig: {
       findUnique: async ({ where }: any) => sites.get(where.id) ?? null,
-      findMany: async ({ where }: any) =>
-        Array.from(sites.values()).filter((s: any) => {
-          if (where?.isActive !== undefined && s.isActive !== where.isActive) return false;
-          if (where?.syncEnabled !== undefined && s.syncEnabled !== where.syncEnabled) return false;
-          return true;
-        }),
+      findMany: async ({ where, select }: any) =>
+        Array.from(sites.values())
+          .filter((s: any) => {
+            if (where?.isActive !== undefined && s.isActive !== where.isActive) return false;
+            if (where?.syncEnabled !== undefined && s.syncEnabled !== where.syncEnabled) return false;
+            if (where?.orderPullEnabled !== undefined && s.orderPullEnabled !== where.orderPullEnabled)
+              return false;
+            return true;
+          })
+          .map((s: any) => {
+            if (!select) return s;
+            const out: any = {};
+            for (const k of Object.keys(select)) {
+              if (select[k]) out[k] = s[k];
+            }
+            return out;
+          }),
       update: async ({ where, data }: any) => {
         const s = sites.get(where.id);
         const merged = { ...s, ...data };
@@ -105,6 +116,7 @@ describe('WooCommerceClient rate-limit gate', () => {
 describe('SyncScheduler.runTick (only due sites are enqueued)', () => {
   let prisma: any;
   let sync: SyncService;
+  let orderPull: any;
   let scheduler: SyncScheduler;
   let queue: any;
 
@@ -113,6 +125,7 @@ describe('SyncScheduler.runTick (only due sites are enqueued)', () => {
       id: 's1', name: 'A', networkRoute: 'DIRECT', baseUrl: 'https://x',
       consumerKeyEncrypted: encrypt('e'), consumerSecretEncrypted: encrypt('e'),
       isActive: true, syncEnabled: true, syncIntervalMs: 600_000, lastSyncAt: null,
+      orderPullEnabled: false, lastOrderPullAt: null,
     });
     // Second site that synced recently → not due.
     prisma._sites.set('s2', {
@@ -120,11 +133,13 @@ describe('SyncScheduler.runTick (only due sites are enqueued)', () => {
       consumerKeyEncrypted: encrypt('e'), consumerSecretEncrypted: encrypt('e'),
       isActive: true, syncEnabled: true, syncIntervalMs: 600_000,
       lastSyncAt: new Date(),
+      orderPullEnabled: false, lastOrderPullAt: null,
     });
     queue = { add: jest.fn(), removeRepeatableByKey: jest.fn(async () => undefined) };
     const woo: any = {};
     sync = new SyncService(prisma, woo, queue);
-    scheduler = new SyncScheduler(queue, prisma, sync);
+    orderPull = { enqueuePull: jest.fn(async () => ({ id: 'pull-1', status: 'QUEUED', queued: true })) };
+    scheduler = new SyncScheduler(queue, prisma, sync, orderPull);
   });
 
   it('enqueues only sites whose lastSyncAt is older than syncIntervalMs (or null)', async () => {
@@ -141,5 +156,15 @@ describe('SyncScheduler.runTick (only due sites are enqueued)', () => {
     prisma._sites.delete('s2');
     const res = await scheduler.runTick();
     expect(res.enqueued).toBe(0);
+  });
+
+  it('enqueues order pull for sites with orderPullEnabled=true and stale lastOrderPullAt', async () => {
+    prisma._sites.get('s1').syncEnabled = false;
+    prisma._sites.get('s1').orderPullEnabled = true;
+    prisma._sites.get('s1').lastOrderPullAt = null;
+    prisma._sites.delete('s2');
+    const res = await scheduler.runTick();
+    expect(res.enqueued).toBe(1);
+    expect(orderPull.enqueuePull).toHaveBeenCalledWith('s1');
   });
 });

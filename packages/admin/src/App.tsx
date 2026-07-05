@@ -12,6 +12,7 @@ import { ProductDetail } from './pages/Products/Detail';
 import { SitesList } from './pages/Sites/List';
 import { ImportExportPage } from './pages/ImportExport';
 import { SyncPage } from './pages/Sync';
+import { OrdersList } from './pages/Orders/List';
 import { UsersPage } from './pages/Users';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
@@ -69,6 +70,7 @@ export default function App() {
           <Route path="/sites" element={<SitesList />} />
           <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/sync" element={<SyncPage />} />
+          <Route path="/orders" element={<OrdersList />} />
           <Route
             path="/users"
             element={

@@ -210,6 +210,10 @@ describe('Auth e2e (JwtAuthGuard + RolesGuard + Passport JWT, no DB)', () => {
 
   // ─── Refresh flow ───────────────────────────────────────────────────────
   it('POST /auth/refresh with the refresh token issues new access + refresh tokens', async () => {
+    // JWT iat is in seconds, so a refresh issued in the same second as the
+    // login produces a byte-identical token. Wait just over a second so the
+    // new access token carries a different iat and is observably distinct.
+    await new Promise((r) => setTimeout(r, 1100));
     const res = await request(app.getHttpServer())
       .post('/auth/refresh')
       .send({ refreshToken: adminLogin.refreshToken })
