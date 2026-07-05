@@ -311,41 +311,60 @@ export class ImportExportService {
    * is unavailable; the processor wraps it in a job.
    */
   async commitJob(jobId: string): Promise<ImportReport> {
-    const job = await this.prisma.importJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new NotFoundException('Import job not found');
-    if (job.status !== 'PREVIEW') {
-      throw new BadRequestException(`Job is in ${job.status} state; cannot commit.`);
+    // Atomic claim: only one caller can transition PREVIEW → PROCESSING. This
+    // is a compare-and-set, not a read-then-write, so two concurrent commits
+    // for the same job (e.g. a double-clicked "Confirm" or two workers) cannot
+    // both proceed — exactly one wins, the other gets a clean BadRequest.
+    const claimed = await this.prisma.importJob.updateMany({
+      where: { id: jobId, status: 'PREVIEW' },
+      data: { status: 'PROCESSING', startedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      const fresh = await this.prisma.importJob.findUnique({ where: { id: jobId } });
+      if (!fresh) throw new NotFoundException('Import job not found');
+      throw new BadRequestException(`Job is in ${fresh.status} state; cannot commit.`);
     }
 
-    const rows = (job.rows as unknown as ValidatedImportRow[] | null) ?? [];
-    const startedAt = new Date();
+    const job = await this.prisma.importJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new NotFoundException('Import job not found');
 
-    await this.prisma.importJob.update({
-      where: { id: jobId },
-      data: { status: 'PROCESSING', startedAt },
-    });
+    const rows = (job.rows as unknown as ValidatedImportRow[] | null) ?? [];
+    const startedAt = job.startedAt ?? new Date();
 
     let created = 0;
     let updated = 0;
     let failed = 0;
     const errors: ImportError[] = [];
 
-    for (const row of rows) {
-      try {
-        await this.applyRow(row, job.createdByUserId ?? undefined);
-        if (row.action === 'create') created += 1;
-        else updated += 1;
-      } catch (err) {
-        failed += 1;
-        errors.push({
-          row: row.row,
-          sku: row.skuMaster,
-          message: (err as Error).message ?? 'Unknown error',
-        });
-        this.logger.warn(
-          `Import row ${row.row} (sku=${row.skuMaster}) failed: ${(err as Error).message}`,
-        );
+    // Per-row application is individually try/caught so one bad row doesn't
+    // abort the import. An unexpected escape from this loop (e.g. a Prisma
+    // connection drop) is caught by the outer guard below so the job is
+    // marked FAILED with a partial report instead of being left stuck in
+    // PROCESSING forever.
+    try {
+      for (const row of rows) {
+        try {
+          await this.applyRow(row, job.createdByUserId ?? undefined);
+          if (row.action === 'create') created += 1;
+          else updated += 1;
+        } catch (err) {
+          failed += 1;
+          errors.push({
+            row: row.row,
+            sku: row.skuMaster,
+            message: (err as Error).message ?? 'Unknown error',
+          });
+          this.logger.warn(
+            `Import row ${row.row} (sku=${row.skuMaster}) failed: ${(err as Error).message}`,
+          );
+        }
       }
+    } catch (fatal) {
+      this.logger.error(
+        `Fatal error applying import job ${jobId}: ${(fatal as Error).message}`,
+      );
+      await this.markFailed(jobId, created, updated, failed, errors, startedAt, fatal as Error);
+      throw fatal;
     }
 
     const finishedAt = new Date();
@@ -358,21 +377,83 @@ export class ImportExportService {
       finishedAt: finishedAt.toISOString(),
     };
 
-    await this.prisma.importJob.update({
-      where: { id: jobId },
-      data: {
-        status: 'COMPLETED',
-        createdCount: created,
-        updatedCount: updated,
-        failedCount: failed,
-        report: report as unknown as Prisma.InputJsonValue,
-        finishedAt,
-        // Clear the heavy rows payload; the report + errors are enough for history.
-        rows: Prisma.JsonNull,
-      },
-    });
+    // The data is already applied at this point; a transient failure on the
+    // final status update shouldn't make BullMQ retry (which would re-enter
+    // commitJob and throw BadRequest because status is PROCESSING). Retry the
+    // status update a few times, and if it still fails, leave the job in
+    // PROCESSING and log loudly — the report is still returned to the worker.
+    await this.markCompleted(jobId, report, finishedAt);
 
     return report;
+  }
+
+  private async markCompleted(
+    jobId: string,
+    report: ImportReport,
+    finishedAt: Date,
+  ): Promise<void> {
+    const payload = {
+      status: 'COMPLETED' as const,
+      createdCount: report.created,
+      updatedCount: report.updated,
+      failedCount: report.failed,
+      report: report as unknown as Prisma.InputJsonValue,
+      finishedAt,
+      rows: Prisma.JsonNull,
+    };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.prisma.importJob.update({ where: { id: jobId }, data: payload });
+        return;
+      } catch (err) {
+        this.logger.warn(
+          `Failed to mark import job ${jobId} COMPLETED (attempt ${attempt}/3): ${(err as Error).message}`,
+        );
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+    }
+    // All retries exhausted — data is applied; status is stale but not corrupt.
+    this.logger.error(
+      `Import job ${jobId} data was applied but the COMPLETED status update failed 3x. The job will appear stuck in PROCESSING and needs manual reconciliation.`,
+    );
+  }
+
+  private async markFailed(
+    jobId: string,
+    created: number,
+    updated: number,
+    failed: number,
+    errors: ImportError[],
+    startedAt: Date,
+    cause: Error,
+  ): Promise<void> {
+    try {
+      const report: ImportReport = {
+        created,
+        updated,
+        failed,
+        errors,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+      };
+      await this.prisma.importJob.update({
+        where: { id: jobId },
+        data: {
+          status: 'FAILED',
+          createdCount: created,
+          updatedCount: updated,
+          failedCount: failed,
+          report: report as unknown as Prisma.InputJsonValue,
+          finishedAt: new Date(),
+          // Preserve the validated rows so a future "retry from preview" is
+          // possible — we only clear rows on COMPLETED/CANCELLED.
+        },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to mark import job ${jobId} FAILED after fatal error: ${(err as Error).message}. Original cause: ${cause.message}`,
+      );
+    }
   }
 
   /** Marks a PREVIEW job as CANCELLED (user dismissed it). */
@@ -603,44 +684,48 @@ export class ImportExportService {
       return;
     }
 
-    // update — fetch existing to compute stock delta for the inventory log
-    const existing = row.productId
-      ? await this.prisma.product.findUnique({ where: { id: row.productId } })
-      : await this.prisma.product.findUnique({ where: { skuMaster: row.skuMaster } });
-    if (!existing) {
-      // Race: product was deleted between preview and commit. Treat as error.
-      throw new Error('Product vanished between preview and commit');
-    }
+    // update — read + compute delta + write inside a single transaction so the
+    // stock-delta computation can't observe a half-applied concurrent write.
+    // (The create path above is already atomic via Prisma's nested writes.)
+    await this.prisma.$transaction(async (tx) => {
+      const existing = row.productId
+        ? await tx.product.findUnique({ where: { id: row.productId } })
+        : await tx.product.findUnique({ where: { skuMaster: row.skuMaster } });
+      if (!existing) {
+        // Race: product was deleted between preview and commit. Treat as error.
+        throw new Error('Product vanished between preview and commit');
+      }
 
-    const nextStock = row.totalStock ?? existing.totalStock;
-    const stockDelta = nextStock - existing.totalStock;
+      const nextStock = row.totalStock ?? existing.totalStock;
+      const stockDelta = nextStock - existing.totalStock;
 
-    const data: Prisma.ProductUpdateInput = {};
-    if (row.name !== undefined) data.name = row.name;
-    if (row.category !== undefined) data.category = row.category;
-    if (row.description !== undefined) data.description = row.description;
-    if (row.basePrice !== undefined) data.basePrice = new Prisma.Decimal(row.basePrice);
-    if (row.barcode !== undefined) data.barcode = row.barcode;
-    if (row.imageUrl !== undefined) data.imageUrl = row.imageUrl;
-    if (row.lowStockThreshold !== undefined) data.lowStockThreshold = row.lowStockThreshold;
-    if (row.expiryDate !== undefined) {
-      data.expiryDate = row.expiryDate ? new Date(row.expiryDate) : null;
-    }
-    if (row.totalStock !== undefined) data.totalStock = nextStock;
+      const data: Prisma.ProductUpdateInput = {};
+      if (row.name !== undefined) data.name = row.name;
+      if (row.category !== undefined) data.category = row.category;
+      if (row.description !== undefined) data.description = row.description;
+      if (row.basePrice !== undefined) data.basePrice = new Prisma.Decimal(row.basePrice);
+      if (row.barcode !== undefined) data.barcode = row.barcode;
+      if (row.imageUrl !== undefined) data.imageUrl = row.imageUrl;
+      if (row.lowStockThreshold !== undefined) data.lowStockThreshold = row.lowStockThreshold;
+      if (row.expiryDate !== undefined) {
+        data.expiryDate = row.expiryDate ? new Date(row.expiryDate) : null;
+      }
+      if (row.totalStock !== undefined) data.totalStock = nextStock;
 
-    if (stockDelta !== 0) {
-      data.inventoryLogs = {
-        create: [
-          {
-            changeAmount: stockDelta,
-            reason: 'IMPORT',
-            createdByUserId: userId ?? null,
-          },
-        ],
-      };
-    }
+      if (stockDelta !== 0) {
+        data.inventoryLogs = {
+          create: [
+            {
+              changeAmount: stockDelta,
+              reason: 'IMPORT',
+              createdByUserId: userId ?? null,
+            },
+          ],
+        };
+      }
 
-    await this.prisma.product.update({ where: { id: existing.id }, data });
+      await tx.product.update({ where: { id: existing.id }, data });
+    });
   }
 
   // ─── Internals: data fetch for exports ─────────────────────────────────────

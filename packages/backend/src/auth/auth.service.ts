@@ -39,7 +39,13 @@ export class AuthService {
   async refresh(token: string): Promise<LoginResult> {
     let payload: JwtPayload;
     try {
-      payload = await this.jwt.verifyAsync<JwtPayload>(token);
+      // The refresh token is signed with JWT_REFRESH_SECRET (separate from the
+      // access-token secret), so it must be verified with that same secret —
+      // the JwtModule's default secret is the access secret and would reject
+      // every refresh token.
+      payload = await this.jwt.verifyAsync<JwtPayload>(token, {
+        secret: this.config.get('JWT_REFRESH_SECRET', { infer: true }),
+      });
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }

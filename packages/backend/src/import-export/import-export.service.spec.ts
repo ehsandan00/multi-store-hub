@@ -116,8 +116,29 @@ function fakePrisma(): PrismaService & {
       },
       count: async () => jobs.size,
       findMany: async () => Array.from(jobs.values()),
+      updateMany: async ({ where, data }: any) => {
+        // Compare-and-set: only update if id matches AND status matches the
+        // expected PREVIEW. Returns { count } so the service can detect a
+        // lost race without a separate read.
+        const target = jobs.get(where.id);
+        if (!target) return { count: 0 };
+        if (where.status !== undefined && target.status !== where.status) {
+          return { count: 0 };
+        }
+        const merged = { ...target, ...data };
+        jobs.set(where.id, merged);
+        return { count: 1 };
+      },
     },
-    $transaction: async (arr: any) => Promise.all(arr),
+    $transaction: async (arg: any) => {
+      // Support both forms: array of operations (Promise.all) and interactive
+      // callback `async (tx) => ...` (used by applyRow's update path so the
+      // read-modify-write is atomic).
+      if (typeof arg === 'function') {
+        return arg(svc);
+      }
+      return Promise.all(arg);
+    },
     products,
     jobs,
     inventory,
@@ -416,6 +437,72 @@ describe('ImportExportService.commitJob (apply changes via BullMQ-free path)', (
 
   it('getPreview throws NotFound for missing jobs', async () => {
     await expect(svc.getPreview('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('markCompleted retries the final status update on transient failure and still returns the report', async () => {
+    const jobId = await seedJob([
+      { row: 2, skuMaster: 'OK', name: 'Good', totalStock: 5, action: 'create' },
+    ]);
+    // Make the COMPLETED status update fail twice, then succeed on the 3rd try.
+    const originalUpdate = prisma.importJob.update;
+    let completedAttempts = 0;
+    (prisma.importJob.update as any) = async ({ where, data }: any) => {
+      if (data.status === 'COMPLETED') {
+        completedAttempts += 1;
+        if (completedAttempts < 3) throw new Error('Transient DB blip');
+      }
+      return originalUpdate.call(prisma.importJob, { where, data });
+    };
+    const report = await svc.commitJob(jobId);
+    expect(report.created).toBe(1);
+    expect(completedAttempts).toBe(3); // retried until it succeeded
+    expect(prisma.jobs.get(jobId).status).toBe('COMPLETED');
+    (prisma.importJob.update as any) = originalUpdate;
+  });
+
+  it('markCompleted leaves the job in PROCESSING (data applied) if all retries exhaust, but still returns the report', async () => {
+    const jobId = await seedJob([
+      { row: 2, skuMaster: 'OK', name: 'Good', totalStock: 5, action: 'create' },
+    ]);
+    const originalUpdate = prisma.importJob.update;
+    (prisma.importJob.update as any) = async ({ where, data }: any) => {
+      if (data.status === 'COMPLETED') throw new Error('DB down');
+      return originalUpdate.call(prisma.importJob, { where, data });
+    };
+    // The commit itself does NOT throw — the report is returned and the data
+    // is applied; only the status update is stuck.
+    const report = await svc.commitJob(jobId);
+    expect(report.created).toBe(1);
+    expect(prisma.products.size).toBe(1); // data was applied
+    expect(prisma.jobs.get(jobId).status).toBe('PROCESSING'); // status stale
+    (prisma.importJob.update as any) = originalUpdate;
+  });
+
+  it('update path uses a transaction so the read-modify-write is atomic', async () => {
+    // Seed an existing product, then commit an update. The fake $transaction
+    // callback form hands the same svc back as `tx`, so findUnique/update on tx
+    // route through the same in-memory store. We assert the inventory log is
+    // written with the correct delta and the product is updated.
+    const existing = await prisma.product.create({
+      data: { skuMaster: 'TX-1', name: 'Old', totalStock: 100, basePrice: 5 } as any,
+    });
+    const jobId = await seedJob([
+      {
+        row: 2,
+        skuMaster: 'TX-1',
+        name: 'New name',
+        totalStock: 80, // delta = -20
+        productId: existing.id,
+        action: 'update',
+      },
+    ]);
+    const report = await svc.commitJob(jobId);
+    expect(report.updated).toBe(1);
+    const updated = prisma.products.get(existing.id);
+    expect(updated.totalStock).toBe(80);
+    expect(updated.name).toBe('New name');
+    expect(prisma.inventory).toHaveLength(1);
+    expect(prisma.inventory[0].changeAmount).toBe(-20);
   });
 });
 

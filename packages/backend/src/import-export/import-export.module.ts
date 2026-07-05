@@ -32,7 +32,15 @@ import { IMPORT_QUEUE_NAME } from './import-export.types';
         return { connection: { url } };
       },
     }),
-    BullModule.registerQueue({ name: IMPORT_QUEUE_NAME }),
+    BullModule.registerQueue({
+      name: IMPORT_QUEUE_NAME,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { age: 86_400, count: 500 },
+        removeOnFail: { age: 86_400, count: 500 },
+      },
+    }),
   ],
   controllers: [ImportExportController],
   providers: [ImportExportService, ImportProcessor],
