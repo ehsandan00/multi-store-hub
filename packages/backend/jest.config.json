@@ -1,0 +1,24 @@
+{
+  "preset": "ts-jest",
+  "testEnvironment": "node",
+  "roots": ["<rootDir>/src", "<rootDir>/prisma"],
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "transform": {
+    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "<rootDir>/tsconfig.spec.json" }]
+  },
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/main.ts",
+    "!src/**/*.module.ts",
+    "!src/**/index.ts",
+    "!src/swagger-export.ts"
+  ],
+  "coverageDirectory": "./coverage",
+  "moduleNameMapper": {
+    "^@/(.*)$": "<rootDir>/src/$1",
+    "^@config/(.*)$": "<rootDir>/src/config/$1",
+    "^@common/(.*)$": "<rootDir>/src/common/$1",
+    "^@prisma-module/(.*)$": "<rootDir>/src/prisma/$1"
+  },
+  "testRegex": ".*\\.spec\\.ts$"
+}

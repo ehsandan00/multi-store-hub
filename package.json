@@ -1,0 +1,34 @@
+{
+  "name": "multi-store-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Centralized Multi-Store Product, Inventory & Order Management Hub",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel -r run dev",
+    "dev:backend": "pnpm --filter @multi-store-hub/backend dev",
+    "dev:admin": "pnpm --filter @multi-store-hub/admin dev",
+    "build": "pnpm -r run build",
+    "build:backend": "pnpm --filter @multi-store-hub/backend build",
+    "build:admin": "pnpm --filter @multi-store-hub/admin build",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "test": "pnpm -r run test",
+    "test:backend": "pnpm --filter @multi-store-hub/backend test",
+    "test:admin": "pnpm --filter @multi-store-hub/admin test",
+    "typecheck": "pnpm -r run typecheck",
+    "db:migrate": "pnpm --filter @multi-store-hub/backend prisma:migrate:dev",
+    "db:seed": "pnpm --filter @multi-store-hub/backend prisma:seed",
+    "db:studio": "pnpm --filter @multi-store-hub/backend prisma:studio",
+    "prepare": "echo 'no husky yet'"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8"
+  }
+}
