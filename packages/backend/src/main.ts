@@ -54,7 +54,9 @@ async function bootstrap() {
     .setDescription(
       'Centralized hub for managing products, inventory, and orders across 8 WooCommerce stores. ' +
         'Phase 1: auth + RBAC, products, sites, test-connection. ' +
-        'Phase 2: Excel import/export with preview + BullMQ-queued commits.',
+        'Phase 2: Excel import/export with preview + BullMQ-queued commits. ' +
+        'Phase 3: WooCommerce product sync (hub -> site) with idempotent upserts, ' +
+        'per-site rate limiting, scheduled syncs, and sync job/log history.',
     )
     .setVersion('0.1.0')
     .addBearerAuth(

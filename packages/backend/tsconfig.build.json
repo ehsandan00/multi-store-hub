@@ -2,7 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
+    "rootDir": "./src",
+    "incremental": false,
     "types": ["node", "jest", "express", "multer"]
   },
-  "include": ["src/**/*", "prisma/**/*.ts"]
+  "include": ["src/**/*"]
 }
