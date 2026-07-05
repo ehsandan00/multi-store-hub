@@ -10,6 +10,7 @@ import { SitesModule } from './sites/sites.module';
 import { HttpProxyModule } from './http-proxy/http-proxy.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { ImportExportModule } from './import-export/import-export.module';
+import { SyncModule } from './sync/sync.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envSchema } from './config/env.validation';
 
@@ -37,6 +38,7 @@ import { envSchema } from './config/env.validation';
     ProductsModule,
     SitesModule,
     ImportExportModule,
+    SyncModule,
   ],
   providers: [
     // JwtAuthGuard as default global guard; controllers can opt out with @Public()

@@ -5,6 +5,10 @@ import { Role } from '@prisma/client';
 import { UsersService } from './users.service';
 import type { PrismaService } from '../prisma/prisma.service';
 
+// bcrypt at 12 rounds is CPU-heavy; under parallel Jest workers the hashing
+// can exceed the 5s default per-test timeout. Give these tests headroom.
+jest.setTimeout(30_000);
+
 /**
  * In-memory Prisma double scoped to the surface UsersService uses.
  * Importantly: there is NO AuthService here — the regression being covered

@@ -20,6 +20,13 @@ import type {
   ImportJob,
   PaginatedImportJobs,
   ExportFilters,
+  SyncScope,
+  EnqueuePushResult,
+  UpdateSchedulePayload,
+  UpdateScheduleResult,
+  SyncJob,
+  PaginatedSyncJobs,
+  PaginatedSyncLogs,
 } from './types';
 import { useAuthStore } from './auth-store';
 
@@ -212,6 +219,30 @@ export const importExportApi = {
   listJobs: (page = 1, pageSize = 25) =>
     api
       .get<PaginatedImportJobs>('/import-export/import', { params: { page, pageSize } })
+      .then((r) => r.data),
+};
+
+// ─── Sync (Phase 3: WooCommerce hub → site) ──────────────────────────────────
+
+export const syncApi = {
+  push: (siteId: string, payload: { scope?: SyncScope; productIds?: string[] } = {}) =>
+    api
+      .post<EnqueuePushResult>(`/sync/sites/${siteId}/push`, payload)
+      .then((r) => r.data),
+
+  updateSchedule: (siteId: string, payload: UpdateSchedulePayload) =>
+    api.patch<UpdateScheduleResult>(`/sync/sites/${siteId}/schedule`, payload).then((r) => r.data),
+
+  listJobs: (q: { siteId?: string; page?: number; pageSize?: number } = {}) =>
+    api
+      .get<PaginatedSyncJobs>('/sync/jobs', { params: q })
+      .then((r) => r.data),
+
+  getJob: (id: string) => api.get<SyncJob>(`/sync/jobs/${id}`).then((r) => r.data),
+
+  listLogs: (q: { siteId?: string; page?: number; pageSize?: number } = {}) =>
+    api
+      .get<PaginatedSyncLogs>('/sync/logs', { params: q })
       .then((r) => r.data),
 };
 

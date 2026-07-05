@@ -17,6 +17,9 @@ const sampleSite: SafeSite = {
   consumerSecretMasked: '••••sec1',
   networkRoute: 'DIRECT',
   isActive: true,
+  syncEnabled: false,
+  syncIntervalMs: 600_000,
+  lastSyncAt: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };

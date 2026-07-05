@@ -45,6 +45,19 @@ enum ImportJobStatus {
   CANCELLED // user dismissed the preview
 }
 
+enum SyncJobStatus {
+  QUEUED // enqueued, waiting for a worker
+  PROCESSING // worker pushing/pulling
+  COMPLETED // finished (may still contain per-item failures)
+  FAILED // fatal failure before/at processing time
+  CANCELLED // user cancelled the queued job
+}
+
+enum SyncDirection {
+  PUSH // hub → site
+  PULL // site → hub (orders/inventory, Phase 5)
+}
+
 // ─── Auth & users ─────────────────────────────────────────────────────────
 
 model User {
@@ -60,6 +73,7 @@ model User {
   inventoryLogs InventoryLog[]
   auditLogs     AuditLog[]
   importJobs    ImportJob[]
+  syncJobs      SyncJob[]
 
   @@index([role])
 }
@@ -134,6 +148,12 @@ model SiteConfig {
   consumerSecretEncrypted String
   networkRoute            NetworkRoute @default(DIRECT)
   isActive                Boolean      @default(true)
+  // Phase 3: scheduled sync config. The scheduler enqueues a PUSH sync for
+  // every site with syncEnabled=true at syncIntervalMs. Manual pushes via the
+  // admin UI bypass these (they enqueue immediately regardless).
+  syncEnabled             Boolean      @default(false)
+  syncIntervalMs          Int          @default(600000) // 10 min default
+  lastSyncAt              DateTime?
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
 
@@ -141,9 +161,11 @@ model SiteConfig {
   orders        Order[]
   customers     Customer[]
   syncLogs      SyncLog[]
+  syncJobs      SyncJob[]
   inventoryLogs InventoryLog[]
 
   @@index([isActive])
+  @@index([syncEnabled])
 }
 
 model SyncLog {
@@ -264,6 +286,41 @@ model ImportJob {
 
   user User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 
+  @@index([status])
+  @@index([createdAt])
+  @@index([createdByUserId])
+}
+
+// ─── Sync jobs (Phase 3: WooCommerce sync, hub → site) ──────────────────────
+
+model SyncJob {
+  id          String         @id @default(uuid())
+  siteId      String
+  direction   SyncDirection  @default(PUSH)
+  status      SyncJobStatus  @default(QUEUED)
+  // What to sync: 'ALL' pushes every hub product to the site; 'MAPPING' pushes
+  // only products with a SiteProductMapping; 'PRODUCT_IDS' pushes a specific
+  // set (carried in payload.productIds).
+  scope       String         @default("ALL")
+  totalItems  Int            @default(0)
+  pushedCount Int            @default(0)
+  failedCount Int            @default(0)
+  // Structured payload:
+  // - errors: [{ sku, message, code? }]
+  // - productIds: string[] (only when scope=PRODUCT_IDS)
+  // - report: final summary
+  errors      Json?
+  payload     Json?
+  report      Json?
+  createdByUserId String?
+  createdAt   DateTime       @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  site SiteConfig @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([siteId])
   @@index([status])
   @@index([createdAt])
   @@index([createdByUserId])

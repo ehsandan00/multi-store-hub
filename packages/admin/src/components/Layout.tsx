@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { to: '/products', label: 'Products', icon: '📦' },
   { to: '/sites', label: 'Sites', icon: '🌐' },
   { to: '/import-export', label: 'Import / Export', icon: '🗂️' },
+  { to: '/sync', label: 'Sync', icon: '🔄' },
   { to: '/users', label: 'Users & Roles', icon: '👥', roles: ['ADMIN'] },
 ];
 
@@ -104,7 +105,7 @@ export function Layout() {
           </div>
           <div className="leading-tight">
             <p className="text-sm font-semibold text-slate-900">Multi-Store Hub</p>
-            <p className="text-[11px] text-slate-500">Phase 2 · Import/Export</p>
+            <p className="text-[11px] text-slate-500">Phase 3 · Sync</p>
           </div>
         </div>
         {navList}

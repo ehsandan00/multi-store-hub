@@ -1,0 +1,165 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SyncPage } from '../src/pages/Sync';
+import { ToastProvider } from '../src/lib/toast';
+import { useAuthStore } from '../src/lib/auth-store';
+import * as apiModule from '../src/lib/api';
+import type { SafeSite, SyncJob } from '../src/lib/types';
+
+const site: SafeSite = {
+  id: 's1',
+  name: 'Demo IR store',
+  baseUrl: 'https://demo.example.ir',
+  consumerKeyMasked: '••••key1',
+  consumerSecretMasked: '••••sec1',
+  networkRoute: 'DIRECT',
+  isActive: true,
+  syncEnabled: false,
+  syncIntervalMs: 600_000,
+  lastSyncAt: null,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const job: SyncJob = {
+  id: 'sj1',
+  siteId: 's1',
+  direction: 'PUSH',
+  status: 'COMPLETED',
+  scope: 'ALL',
+  totalItems: 3,
+  pushedCount: 2,
+  failedCount: 1,
+  errors: [{ sku: 'BAD-1', message: 'WC rejected: duplicate SKU', code: 'HTTP_400' }],
+  payload: null,
+  report: {
+    pushed: 2,
+    failed: 1,
+    created: 1,
+    updated: 1,
+    errors: [{ sku: 'BAD-1', message: 'WC rejected: duplicate SKU', code: 'HTTP_400' }],
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    routeUsed: 'DIRECT',
+  },
+  createdByUserId: 'u1',
+  createdAt: new Date().toISOString(),
+  startedAt: new Date().toISOString(),
+  finishedAt: new Date().toISOString(),
+  site: { name: 'Demo IR store' },
+};
+
+function renderPage() {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={qc}>
+      <ToastProvider>
+        <MemoryRouter>
+          <SyncPage />
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe('Sync page', () => {
+  beforeEach(() => {
+    useAuthStore.setState({
+      user: { id: 'u1', email: 'admin@hub.local', role: 'ADMIN' },
+      accessToken: 'tok',
+      refreshToken: 'rtok',
+    });
+    vi.restoreAllMocks();
+    vi.spyOn(apiModule.sitesApi, 'list').mockResolvedValue({
+      data: [site],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
+    vi.spyOn(apiModule.syncApi, 'listJobs').mockResolvedValue({
+      data: [job],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+    vi.spyOn(apiModule.syncApi, 'listLogs').mockResolvedValue({
+      data: [
+        {
+          id: 'sl1',
+          siteId: 's1',
+          syncType: 'product_push',
+          status: 'partial',
+          details: {},
+          createdAt: new Date().toISOString(),
+          site: { name: 'Demo IR store' },
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
+  });
+
+  it('renders per-site cards, the jobs table, and the sync log', async () => {
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
+    );
+    // Schedule section
+    expect(screen.getByText('Scheduled sync')).toBeInTheDocument();
+    // Jobs table — latest job shows pushed/failed (2 pushed)
+    await waitFor(() => expect(screen.getByText('2')).toBeInTheDocument());
+    // Sync log table
+    expect(screen.getByText('product_push')).toBeInTheDocument();
+  });
+
+  it('hides the Push button and schedule controls for VIEWERs (read-only)', async () => {
+    useAuthStore.setState({
+      user: { id: 'u3', email: 'viewer@hub.local', role: 'VIEWER' },
+      accessToken: 'tok',
+      refreshToken: 'rtok',
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByRole('button', { name: /push products/i })).not.toBeInTheDocument();
+    // Viewer sees the schedule state as a badge, not a checkbox.
+    expect(screen.getByText('disabled')).toBeInTheDocument();
+  });
+
+  it('enqueues a push on confirm and shows a success toast', async () => {
+    const user = userEvent.setup();
+    const pushSpy = vi
+      .spyOn(apiModule.syncApi, 'push')
+      .mockResolvedValue({ id: 'sj-new', status: 'QUEUED', queued: true });
+
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
+    );
+    await user.click(screen.getByRole('button', { name: /push products/i }));
+    // Confirm dialog opens
+    await waitFor(() => expect(screen.getByText(/Queue push/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /Queue push/i }));
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('s1', { scope: 'ALL' }));
+  });
+
+  it('toggles scheduled sync on for the site', async () => {
+    const user = userEvent.setup();
+    const schedSpy = vi
+      .spyOn(apiModule.syncApi, 'updateSchedule')
+      .mockResolvedValue({ syncEnabled: true, syncIntervalMs: 600_000 });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Scheduled sync')).toBeInTheDocument());
+    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
+    await user.click(checkbox);
+    await waitFor(() => expect(schedSpy).toHaveBeenCalledWith('s1', { syncEnabled: true }));
+  });
+});

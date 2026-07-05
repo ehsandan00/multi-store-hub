@@ -75,6 +75,17 @@ export class UpdateSiteDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Phase 3: enable scheduled sync (admin also via /sync/sites/:id/schedule).' })
+  @IsBoolean()
+  @IsOptional()
+  syncEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Sync interval in ms (60000 – 86400000).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  syncIntervalMs?: number;
 }
 
 export class ListSitesQuery {
@@ -101,6 +112,9 @@ export interface SafeSite {
   consumerSecretMasked: string;
   networkRoute: NetworkRoute;
   isActive: boolean;
+  syncEnabled: boolean;
+  syncIntervalMs: number;
+  lastSyncAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

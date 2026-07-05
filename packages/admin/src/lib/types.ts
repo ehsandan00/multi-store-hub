@@ -92,6 +92,9 @@ export interface SafeSite {
   consumerSecretMasked: string;
   networkRoute: NetworkRoute;
   isActive: boolean;
+  syncEnabled: boolean;
+  syncIntervalMs: number;
+  lastSyncAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +113,8 @@ export interface CreateSitePayload {
   consumerSecret: string;
   networkRoute?: NetworkRoute;
   isActive?: boolean;
+  syncEnabled?: boolean;
+  syncIntervalMs?: number;
 }
 
 export type UpdateSitePayload = Partial<Omit<CreateSitePayload, 'name'>> & {
@@ -227,4 +232,87 @@ export interface ExportFilters {
   siteId?: string;
   minStock?: number;
   maxStock?: number;
+}
+
+// ─── Sync (Phase 3: WooCommerce hub → site) ─────────────────────────────────
+
+export type SyncJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+export type SyncDirection = 'PUSH' | 'PULL';
+export type SyncScope = 'ALL' | 'MAPPING' | 'PRODUCT_IDS';
+
+export interface SyncItemError {
+  sku: string;
+  message: string;
+  code?: string;
+  statusCode?: number;
+}
+
+export interface SyncReport {
+  pushed: number;
+  failed: number;
+  created: number;
+  updated: number;
+  errors: SyncItemError[];
+  startedAt: string;
+  finishedAt: string;
+  routeUsed: string;
+}
+
+export interface SyncJob {
+  id: string;
+  siteId: string;
+  direction: SyncDirection;
+  status: SyncJobStatus;
+  scope: SyncScope;
+  totalItems: number;
+  pushedCount: number;
+  failedCount: number;
+  errors: SyncItemError[] | null;
+  payload: { productIds?: string[] } | null;
+  report: SyncReport | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  site?: { name: string } | null;
+}
+
+export interface PaginatedSyncJobs {
+  data: SyncJob[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SyncLogRow {
+  id: string;
+  siteId: string;
+  syncType: string;
+  status: 'success' | 'failed' | 'partial';
+  details: unknown;
+  createdAt: string;
+  site?: { name: string } | null;
+}
+
+export interface PaginatedSyncLogs {
+  data: SyncLogRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface EnqueuePushResult {
+  id: string;
+  status: SyncJobStatus;
+  queued: boolean;
+}
+
+export interface UpdateSchedulePayload {
+  syncEnabled?: boolean;
+  syncIntervalMs?: number;
+}
+
+export interface UpdateScheduleResult {
+  syncEnabled: boolean;
+  syncIntervalMs: number;
 }
