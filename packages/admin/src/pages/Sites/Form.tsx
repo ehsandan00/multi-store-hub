@@ -5,8 +5,14 @@ import { sitesApi, toApiError } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Field';
-import type { CreateSitePayload, NetworkRoute, SafeSite, UpdateSitePayload } from '../../lib/types';
+import { Input, Select } from '../../components/ui/Field';
+import type {
+  CreateSitePayload,
+  NetworkRoute,
+  SafeSite,
+  SitePlatform,
+  UpdateSitePayload,
+} from '../../lib/types';
 
 interface Props {
   open: boolean;
@@ -17,6 +23,7 @@ interface Props {
 const EMPTY: CreateSitePayload = {
   name: '',
   baseUrl: '',
+  platform: 'WOOCOMMERCE',
   consumerKey: '',
   consumerSecret: '',
   networkRoute: 'DIRECT',
@@ -28,6 +35,7 @@ function buildForm(site?: SafeSite | null): CreateSitePayload {
     ? {
         name: site.name,
         baseUrl: site.baseUrl,
+        platform: site.platform,
         consumerKey: '',
         consumerSecret: '',
         networkRoute: site.networkRoute,
@@ -49,7 +57,15 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
     if (!open) return;
     setForm(buildForm(initial));
     setErrors({});
-  }, [open, initial?.id, initial?.networkRoute, initial?.name, initial?.baseUrl, initial?.isActive]);
+  }, [
+    open,
+    initial?.id,
+    initial?.networkRoute,
+    initial?.name,
+    initial?.baseUrl,
+    initial?.platform,
+    initial?.isActive,
+  ]);
 
   function set<K extends keyof CreateSitePayload>(key: K, value: CreateSitePayload[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -64,7 +80,8 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
       e.baseUrl = t('sites.validation.baseUrlFormat');
     if (!isEdit) {
       if (!form.consumerKey.trim()) e.consumerKey = t('sites.validation.consumerKeyRequired');
-      if (!form.consumerSecret.trim()) e.consumerSecret = t('sites.validation.consumerSecretRequired');
+      if (!form.consumerSecret.trim())
+        e.consumerSecret = t('sites.validation.consumerSecretRequired');
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -98,6 +115,7 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
       const payload: UpdateSitePayload = {
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim(),
+        platform: form.platform,
         networkRoute: form.networkRoute,
         isActive: form.isActive,
         ...(form.consumerKey.trim() ? { consumerKey: form.consumerKey.trim() } : {}),
@@ -135,7 +153,11 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
         </>
       }
     >
-      <form id="site-form" onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <form
+        id="site-form"
+        onSubmit={handleSubmit}
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+      >
         <Input
           id="name"
           label={t('sites.displayName')}
@@ -153,24 +175,51 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
           error={errors.baseUrl}
           placeholder="https://store.example.ir"
         />
+        <Select
+          id="platform"
+          label={t('sites.platform')}
+          value={form.platform ?? 'WOOCOMMERCE'}
+          onChange={(e) => set('platform', e.target.value as SitePlatform)}
+        >
+          <option value="WOOCOMMERCE">{t('sites.platformWooCommerce')}</option>
+          <option value="NOPCOMMERCE_ASPNET">{t('sites.platformAspNet')}</option>
+        </Select>
         <Input
           id="consumerKey"
-          label={isEdit ? t('sites.consumerKeyEdit') : t('sites.consumerKey')}
+          label={
+            form.platform === 'NOPCOMMERCE_ASPNET'
+              ? t('sites.aspNetApiKey')
+              : isEdit
+                ? t('sites.consumerKeyEdit')
+                : t('sites.consumerKey')
+          }
           required={!isEdit}
           value={form.consumerKey}
           onChange={(e) => set('consumerKey', e.target.value)}
           error={errors.consumerKey}
-          placeholder="ck_xxxxxxxxxxxxxxxxxxxx"
+          placeholder={
+            form.platform === 'NOPCOMMERCE_ASPNET' ? 'hub_api_key' : 'ck_xxxxxxxxxxxxxxxxxxxx'
+          }
         />
         <Input
           id="consumerSecret"
-          label={isEdit ? t('sites.consumerSecretEdit') : t('sites.consumerSecret')}
+          label={
+            form.platform === 'NOPCOMMERCE_ASPNET'
+              ? t('sites.aspNetApiSecret')
+              : isEdit
+                ? t('sites.consumerSecretEdit')
+                : t('sites.consumerSecret')
+          }
           required={!isEdit}
           type="password"
           value={form.consumerSecret}
           onChange={(e) => set('consumerSecret', e.target.value)}
           error={errors.consumerSecret}
-          placeholder="cs_xxxxxxxxxxxxxxxxxxxx"
+          placeholder={
+            form.platform === 'NOPCOMMERCE_ASPNET'
+              ? '64+ character secret'
+              : 'cs_xxxxxxxxxxxxxxxxxxxx'
+          }
         />
         <div className="sm:col-span-2">
           <label className="label">{t('sites.networkRoute')}</label>
@@ -209,7 +258,7 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
               type="checkbox"
               checked={form.isActive}
               onChange={(e) => set('isActive', e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="text-brand-600 focus:ring-brand-500 h-4 w-4 rounded border-slate-300"
             />
             {t('common.active')}
           </label>

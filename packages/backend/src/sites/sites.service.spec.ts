@@ -60,7 +60,10 @@ describe('SitesService', () => {
 
   it('encrypts consumer key/secret on create and never returns them in clear', async () => {
     const prisma = fakePrisma();
-    const svc = new SitesService(prisma, fakeHttp(async () => ({ status: 200 })));
+    const svc = new SitesService(
+      prisma,
+      fakeHttp(async () => ({ status: 200 })),
+    );
     const created = await svc.create({
       name: 'Demo',
       baseUrl: 'https://demo.example.com',
@@ -81,6 +84,7 @@ describe('SitesService', () => {
     const prisma = fakePrisma();
     const http = fakeHttp(async () => ({
       status: 200,
+      body: [],
       latencyMs: 123,
       routeUsed: 'DIRECT',
       attempts: 1,
@@ -100,6 +104,43 @@ describe('SitesService', () => {
     expect(prisma.logs).toHaveLength(1);
     expect(prisma.logs[0].status).toBe('success');
     expect(prisma.logs[0].syncType).toBe('test_connection');
+  });
+
+  it('uses the signed ASP.NET health client for ASP.NET sites', async () => {
+    const prisma = fakePrisma();
+    const aspNet = {
+      health: async () => ({
+        status: 200,
+        latencyMs: 44,
+        routeUsed: 'DIRECT',
+        attempts: 1,
+        body: { ok: true, platform: 'nopCommerce', pluginVersion: '1.0.0' },
+      }),
+    };
+    const svc = new SitesService(
+      prisma,
+      fakeHttp(async () => {
+        throw new Error('WooCommerce probe must not be used');
+      }),
+      aspNet as any,
+    );
+    const site = await svc.create({
+      name: 'ASP.NET',
+      baseUrl: 'https://asp.example',
+      platform: 'NOPCOMMERCE_ASPNET',
+      consumerKey: 'key',
+      consumerSecret: 'secret',
+    });
+
+    const result = await svc.testConnection(site.id);
+
+    expect(result.ok).toBe(true);
+    expect(result.latencyMs).toBe(44);
+    expect(prisma.logs[0]).toMatchObject({
+      siteId: site.id,
+      syncType: 'test_connection',
+      status: 'success',
+    });
   });
 
   it('test-connection failure path writes SyncLog(status=failed) and surfaces error code', async () => {
@@ -130,13 +171,19 @@ describe('SitesService', () => {
 
   it('throws NotFound when testing a missing site', async () => {
     const prisma = fakePrisma();
-    const svc = new SitesService(prisma, fakeHttp(async () => ({ status: 200 })));
+    const svc = new SitesService(
+      prisma,
+      fakeHttp(async () => ({ status: 200 })),
+    );
     await expect(svc.testConnection('missing')).rejects.toThrow(NotFoundException);
   });
 
   it('keeps existing credentials when update omits them', async () => {
     const prisma = fakePrisma();
-    const svc = new SitesService(prisma, fakeHttp(async () => ({ status: 200 })));
+    const svc = new SitesService(
+      prisma,
+      fakeHttp(async () => ({ status: 200 })),
+    );
     const s = await svc.create({
       name: 'Demo',
       baseUrl: 'https://demo.example.com',

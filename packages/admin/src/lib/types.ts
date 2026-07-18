@@ -1,6 +1,7 @@
 // Mirrors @prisma/client enums on the backend.
 export type Role = 'ADMIN' | 'WAREHOUSE_STAFF' | 'VIEWER';
 export type NetworkRoute = 'DIRECT' | 'VIA_FOREIGN_PROXY';
+export type SitePlatform = 'WOOCOMMERCE' | 'NOPCOMMERCE_ASPNET';
 export type ProductType = 'SIMPLE' | 'VARIABLE' | 'VARIATION';
 
 export interface AuthenticatedUser {
@@ -122,6 +123,7 @@ export interface SafeSite {
   id: string;
   name: string;
   baseUrl: string;
+  platform?: SitePlatform;
   consumerKeyMasked: string;
   consumerSecretMasked: string;
   networkRoute: NetworkRoute;
@@ -145,6 +147,7 @@ export interface PaginatedSites {
 export interface CreateSitePayload {
   name: string;
   baseUrl: string;
+  platform?: SitePlatform;
   consumerKey: string;
   consumerSecret: string;
   networkRoute?: NetworkRoute;
@@ -275,10 +278,38 @@ export interface ExportFilters {
 
 export type SyncJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type SyncDirection = 'PUSH' | 'PULL';
-export type SyncScope = 'ALL' | 'MAPPING' | 'PRODUCT_IDS';
+export type SyncScope = 'ALL' | 'MAPPING' | 'PRODUCT_IDS' | 'PRICE_STOCK';
+
+export interface AspNetDryRunItem {
+  productId: string;
+  sku: string;
+  sourceProductId: number | null;
+  sourceCombinationId: number | null;
+  status: 'matched_by_id' | 'matched_by_sku' | 'unresolved' | 'duplicate';
+  remote?: {
+    id: number;
+    sku: string | null;
+    name?: string;
+    price: string;
+    stockQuantity: number;
+    kind: 'PRODUCT' | 'COMBINATION';
+  };
+  wouldUpdate?: { price: string; stockQuantity: number };
+}
+
+export interface AspNetDryRunReport {
+  siteId: string;
+  total: number;
+  matched: number;
+  unresolved: number;
+  duplicate: number;
+  items: AspNetDryRunItem[];
+}
 
 export interface SyncItemError {
   sku: string;
+  sourceProductId?: number;
+  sourceCombinationId?: number;
   message: string;
   code?: string;
   statusCode?: number;
@@ -653,12 +684,7 @@ export interface MatchingGapsResult {
   summary: { hubNotOnSiteTotal: number; siteNotInHubTotal: number };
 }
 
-export type CompareLinkStatus =
-  | 'LINKED'
-  | 'NO_MAPPING'
-  | 'PENDING'
-  | 'NOT_SYNCED'
-  | 'SITE_ONLY';
+export type CompareLinkStatus = 'LINKED' | 'NO_MAPPING' | 'PENDING' | 'NOT_SYNCED' | 'SITE_ONLY';
 
 export interface ProductCompareRow {
   kind: 'HUB' | 'SITE_ONLY';

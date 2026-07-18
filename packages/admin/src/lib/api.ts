@@ -21,6 +21,7 @@ import type {
   PaginatedImportJobs,
   ExportFilters,
   SyncScope,
+  AspNetDryRunReport,
   EnqueuePushResult,
   EnqueuePullResult,
   UpdateSchedulePayload,
@@ -72,8 +73,7 @@ function resolveDevBaseURL(): string {
 }
 
 const baseURL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV ? resolveDevBaseURL() : '/api');
+  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? resolveDevBaseURL() : '/api');
 
 export const api: AxiosInstance = axios.create({
   baseURL,
@@ -116,7 +116,8 @@ async function refreshAccessToken(): Promise<boolean> {
 api.interceptors.response.use(
   (r) => r,
   async (error: AxiosError<ApiError>) => {
-    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+    const original = error.config as
+      (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
     const status = error.response?.status;
 
     // Skip refresh for /auth/* endpoints (avoid infinite loop on bad login)
@@ -203,14 +204,14 @@ export const productsApi = {
   removeHubPhoto: (id: string) =>
     api.delete<ProductRow>(`/products/${id}/hub-photo`).then((r) => normalizeProduct(r.data)),
   lookup: (code: string) =>
-    api.get<ProductRow>('/products/lookup', { params: { code } }).then((r) => normalizeProduct(r.data)),
+    api
+      .get<ProductRow>('/products/lookup', { params: { code } })
+      .then((r) => normalizeProduct(r.data)),
 };
 
 export const sitesApi = {
   list: (page = 1, pageSize = 100) =>
-    api
-      .get<PaginatedSites>('/sites', { params: { page, pageSize } })
-      .then((r) => r.data),
+    api.get<PaginatedSites>('/sites', { params: { page, pageSize } }).then((r) => r.data),
   get: (id: string) => api.get<SafeSite>(`/sites/${id}`).then((r) => r.data),
   create: (p: CreateSitePayload) => api.post<SafeSite>('/sites', p).then((r) => r.data),
   update: (id: string, p: UpdateSitePayload) =>
@@ -268,7 +269,11 @@ export const importExportApi = {
       params: { wooCommerceForSiteId: siteId },
       responseType: 'blob',
     });
-    const slug = (siteName ?? 'site').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'site';
+    const slug =
+      (siteName ?? 'site')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'site';
     triggerDownload(res.data as Blob, `woocommerce-${slug}.csv`);
   },
 
@@ -286,7 +291,9 @@ export const importExportApi = {
     api.get<ImportPreview>(`/import-export/import/${jobId}/preview`).then((r) => r.data),
 
   commit: (jobId: string) =>
-    api.post<{ jobId: string; queued: boolean }>(`/import-export/import/${jobId}/commit`).then((r) => r.data),
+    api
+      .post<{ jobId: string; queued: boolean }>(`/import-export/import/${jobId}/commit`)
+      .then((r) => r.data),
 
   cancel: (jobId: string) =>
     api.post<void>(`/import-export/import/${jobId}/cancel`).then((r) => r.data),
@@ -304,29 +311,44 @@ export const importExportApi = {
 
 export const syncApi = {
   push: (siteId: string, payload: { scope?: SyncScope; productIds?: string[] } = {}) =>
+    api.post<EnqueuePushResult>(`/sync/sites/${siteId}/push`, payload).then((r) => r.data),
+
+  previewAspNet: (
+    siteId: string,
+    payload: { scope?: SyncScope; productIds?: string[] } = { scope: 'PRICE_STOCK' },
+  ) =>
     api
-      .post<EnqueuePushResult>(`/sync/sites/${siteId}/push`, payload)
+      .post<AspNetDryRunReport>(`/sync/sites/${siteId}/aspnet/preview`, payload)
+      .then((r) => r.data),
+
+  importAspNetMappings: (
+    siteId: string,
+    rows: {
+      sourceProductId: number;
+      sourceKind?: 'PRODUCT' | 'COMBINATION';
+      sku: string;
+    }[],
+  ) =>
+    api
+      .post<{ imported: number; unresolved: number; duplicates: number }>(
+        `/sync/sites/${siteId}/aspnet/mappings`,
+        { rows },
+      )
       .then((r) => r.data),
 
   pull: (siteId: string) =>
-    api
-      .post<EnqueuePullResult>(`/sync/sites/${siteId}/pull`)
-      .then((r) => r.data),
+    api.post<EnqueuePullResult>(`/sync/sites/${siteId}/pull`).then((r) => r.data),
 
   updateSchedule: (siteId: string, payload: UpdateSchedulePayload) =>
     api.patch<UpdateScheduleResult>(`/sync/sites/${siteId}/schedule`, payload).then((r) => r.data),
 
   listJobs: (q: { siteId?: string; page?: number; pageSize?: number } = {}) =>
-    api
-      .get<PaginatedSyncJobs>('/sync/jobs', { params: q })
-      .then((r) => r.data),
+    api.get<PaginatedSyncJobs>('/sync/jobs', { params: q }).then((r) => r.data),
 
   getJob: (id: string) => api.get<SyncJob>(`/sync/jobs/${id}`).then((r) => r.data),
 
   listLogs: (q: { siteId?: string; page?: number; pageSize?: number } = {}) =>
-    api
-      .get<PaginatedSyncLogs>('/sync/logs', { params: q })
-      .then((r) => r.data),
+    api.get<PaginatedSyncLogs>('/sync/logs', { params: q }).then((r) => r.data),
 
   deleteLog: (id: string) => api.delete(`/sync/logs/${id}`).then((r) => r.data),
 
@@ -340,25 +362,18 @@ export const syncApi = {
 
 export const ordersApi = {
   list: (q: ListOrdersQuery = {}) =>
-    api
-      .get<PaginatedOrders>('/orders', { params: q })
-      .then((r) => r.data),
+    api.get<PaginatedOrders>('/orders', { params: q }).then((r) => r.data),
   get: (id: string) => api.get<OrderDetail>(`/orders/${id}`).then((r) => r.data),
 };
 
 export const logisticsOrdersApi = {
-  employees: () =>
-    api.get<LogisticsEmployee[]>('/logistics-orders/employees').then((r) => r.data),
+  employees: () => api.get<LogisticsEmployee[]>('/logistics-orders/employees').then((r) => r.data),
   list: (q: ListLogisticsOrdersQuery = {}) =>
-    api
-      .get<PaginatedLogisticsOrders>('/logistics-orders', { params: q })
-      .then((r) => r.data),
+    api.get<PaginatedLogisticsOrders>('/logistics-orders', { params: q }).then((r) => r.data),
   create: (payload: CreateLogisticsOrderPayload) =>
     api.post<LogisticsOrderRow>('/logistics-orders', payload).then((r) => r.data),
   updateStatus: (id: string, status: LogisticsOrderStatus) =>
-    api
-      .patch<LogisticsOrderRow>(`/logistics-orders/${id}/status`, { status })
-      .then((r) => r.data),
+    api.patch<LogisticsOrderRow>(`/logistics-orders/${id}/status`, { status }).then((r) => r.data),
 };
 
 // ─── Dashboard (Phase 4) ──────────────────────────────────────────────────────
@@ -402,9 +417,7 @@ export const reportsApi = {
   },
 
   sync: (q: SyncReportQuery = {}) =>
-    api
-      .get<PaginatedReport<SyncReportRow>>('/reports/sync', { params: q })
-      .then((r) => r.data),
+    api.get<PaginatedReport<SyncReportRow>>('/reports/sync', { params: q }).then((r) => r.data),
 
   exportSync: async (q: SyncReportQuery = {}) => {
     const res = await api.get('/reports/sync.xlsx', { params: q, responseType: 'blob' });
@@ -435,12 +448,15 @@ export const matchingApi = {
       .then((r) => r.data);
   },
 
-  listSuggestions: (q: { siteId?: string; status?: MatchStatus; page?: number; pageSize?: number } = {}) =>
+  listSuggestions: (
+    q: { siteId?: string; status?: MatchStatus; page?: number; pageSize?: number } = {},
+  ) =>
     api
       .get<PaginatedMappingSuggestions>('/matching/suggestions', { params: q })
       .then((r) => r.data),
 
-  approve: (id: string) => api.post<void>(`/matching/suggestions/${id}/approve`).then((r) => r.data),
+  approve: (id: string) =>
+    api.post<void>(`/matching/suggestions/${id}/approve`).then((r) => r.data),
 
   reject: (id: string) => api.post<void>(`/matching/suggestions/${id}/reject`).then((r) => r.data),
 
@@ -471,7 +487,8 @@ export const auditLogApi = {
 
 function buildExportFileName(filters: ExportFilters): string {
   const parts = ['products'];
-  if (filters.category) parts.push(`cat-${filters.category.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`);
+  if (filters.category)
+    parts.push(`cat-${filters.category.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`);
   if (filters.siteId) parts.push('site');
   if (filters.minStock !== undefined || filters.maxStock !== undefined) parts.push('filtered');
   return parts.join('-');

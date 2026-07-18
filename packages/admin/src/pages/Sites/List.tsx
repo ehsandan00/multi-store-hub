@@ -93,8 +93,7 @@ export function SitesList() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t('sites.title')}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {t('sites.subtitle')}{' '}
-            {!canMutate && t('common.readOnly')}
+            {t('sites.subtitle')} {!canMutate && t('common.readOnly')}
           </p>
         </div>
         {canMutate && (
@@ -139,6 +138,7 @@ export function SitesList() {
             <tr>
               <th>{t('sites.name')}</th>
               <th>{t('sites.baseUrl')}</th>
+              <th>{t('sites.platform')}</th>
               <th>{t('sites.route')}</th>
               <th>{t('sites.credentials')}</th>
               <th>{t('sites.status')}</th>
@@ -149,14 +149,14 @@ export function SitesList() {
           <tbody>
             {listQ.isLoading && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-400">
+                <td colSpan={8} className="py-8 text-center text-slate-400">
                   <Spinner className="mx-auto h-5 w-5" />
                 </td>
               </tr>
             )}
             {listQ.isError && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-rose-600">
+                <td colSpan={8} className="py-6 text-center text-rose-600">
                   {t('sites.loadFailed', { message: toApiError(listQ.error).message })}
                 </td>
               </tr>
@@ -167,6 +167,13 @@ export function SitesList() {
                 <tr key={s.id}>
                   <td className="font-medium text-slate-900">{s.name}</td>
                   <td className="max-w-[260px] truncate font-mono text-xs">{s.baseUrl}</td>
+                  <td>
+                    <Badge tone={s.platform === 'NOPCOMMERCE_ASPNET' ? 'amber' : 'gray'}>
+                      {s.platform === 'NOPCOMMERCE_ASPNET'
+                        ? t('sites.platformAspNet')
+                        : t('sites.platformWooCommerce')}
+                    </Badge>
+                  </td>
                   <td>
                     {s.networkRoute === 'DIRECT' ? (
                       <Badge tone="green">{t('sites.directIr')}</Badge>
@@ -320,15 +327,29 @@ function SiteCard({
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
         <div>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">
+            {t('sites.platform')}
+          </p>
+          <p>
+            {site.platform === 'NOPCOMMERCE_ASPNET'
+              ? t('sites.platformAspNet')
+              : t('sites.platformWooCommerce')}
+          </p>
+        </div>
+        <div>
           <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.route')}</p>
           <p>{site.networkRoute === 'DIRECT' ? t('sites.directIr') : t('sites.viaProxy')}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.credentials')}</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">
+            {t('sites.credentials')}
+          </p>
           <p className="font-mono">{site.consumerKeyMasked}</p>
         </div>
         <div className="col-span-2">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.updatedAt')}</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">
+            {t('sites.updatedAt')}
+          </p>
           <p>{formatDateTime(site.updatedAt)}</p>
         </div>
       </div>
@@ -337,9 +358,7 @@ function SiteCard({
         <div
           className={
             'mt-3 rounded-lg p-2 text-xs ' +
-            (result.ok
-              ? 'bg-emerald-50 text-emerald-800'
-              : 'bg-rose-50 text-rose-800')
+            (result.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800')
           }
         >
           {result.ok ? (

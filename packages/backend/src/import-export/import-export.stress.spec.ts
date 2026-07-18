@@ -28,7 +28,7 @@ function fakePrisma(): any {
         if (where.id) return products.get(where.id) ?? null;
         if (where.skuMaster) {
           const id = skuIndex.get(where.skuMaster);
-          return id ? products.get(id) ?? null : null;
+          return id ? (products.get(id) ?? null) : null;
         }
         return null;
       },
@@ -55,14 +55,20 @@ function fakePrisma(): any {
         return row;
       },
       update: async ({ where, data }: any) => {
-        const existing = products.get(where.id) ?? products.get(skuIndex.get(where.skuMaster ?? '') ?? '');
+        const existing =
+          products.get(where.id) ?? products.get(skuIndex.get(where.skuMaster ?? '') ?? '');
         if (!existing) throw new Error('not found');
         const merged = { ...existing, ...data };
         delete merged.inventoryLogs;
         products.set(existing.id, merged);
         if (data.inventoryLogs?.create) {
           for (const log of data.inventoryLogs.create) {
-            inventory.push({ id: `l${++logId}`, productId: existing.id, ...log, createdAt: new Date() });
+            inventory.push({
+              id: `l${++logId}`,
+              productId: existing.id,
+              ...log,
+              createdAt: new Date(),
+            });
           }
         }
         return merged;
@@ -70,6 +76,11 @@ function fakePrisma(): any {
       count: async () => products.size,
     },
     inventoryLog: { findMany: async () => inventory.slice() },
+    productExpiryBatch: {
+      deleteMany: async () => ({ count: 0 }),
+      create: async ({ data }: any) => ({ id: 'expiry', ...data }),
+      createMany: async ({ data }: any) => ({ count: data.length }),
+    },
     siteProductMapping: { findMany: async () => [] },
     siteConfig: { findUnique: async () => ({ id: 's1', name: 'Demo', baseUrl: 'https://x' }) },
     importJob: {

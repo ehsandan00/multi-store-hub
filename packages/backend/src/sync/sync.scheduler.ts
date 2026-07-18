@@ -79,13 +79,15 @@ export class SyncScheduler implements OnModuleInit, OnModuleDestroy {
         await this.sync.enqueuePush(s.id, 'ALL');
         enqueued.push(s.id);
       } catch (err) {
-        this.logger.warn(`Failed to enqueue scheduled push for site ${s.name}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to enqueue scheduled push for site ${s.name}: ${(err as Error).message}`,
+        );
       }
     }
 
     // ─── PULL: sites due for an order pull ──────────────────────────────────
     const pullSites = await this.prisma.siteConfig.findMany({
-      where: { isActive: true, orderPullEnabled: true },
+      where: { isActive: true, orderPullEnabled: true, platform: 'WOOCOMMERCE' },
       select: { id: true, name: true, syncIntervalMs: true, lastOrderPullAt: true },
     });
     for (const s of pullSites) {
@@ -95,7 +97,9 @@ export class SyncScheduler implements OnModuleInit, OnModuleDestroy {
         await this.orderPull.enqueuePull(s.id);
         enqueued.push(s.id);
       } catch (err) {
-        this.logger.warn(`Failed to enqueue scheduled order pull for site ${s.name}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to enqueue scheduled order pull for site ${s.name}: ${(err as Error).message}`,
+        );
       }
     }
 

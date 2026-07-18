@@ -1,10 +1,17 @@
-import { ConflictException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { NetworkRoute } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { NetworkRoute, SitePlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HttpProxyService } from '../http-proxy/http-proxy.service';
 import { HttpProxyError } from '../http-proxy/http-proxy.error';
 import { decrypt, encrypt, maskSecret } from '../config/crypto.util';
 import type { CreateSiteDto, ListSitesQuery, SafeSite, UpdateSiteDto } from './sites.dto';
+import { AspNetProductClient } from '../sync/aspnet-product.client';
 
 export interface TestConnectionResult {
   ok: boolean;
@@ -19,6 +26,7 @@ interface RawSite {
   id: string;
   name: string;
   baseUrl: string;
+  platform: SitePlatform;
   consumerKeyEncrypted: string;
   consumerSecretEncrypted: string;
   networkRoute: NetworkRoute;
@@ -47,6 +55,7 @@ function toSafe(s: RawSite): SafeSite {
     id: s.id,
     name: s.name,
     baseUrl: s.baseUrl,
+    platform: s.platform,
     consumerKeyMasked: keyMasked,
     consumerSecretMasked: secretMasked,
     networkRoute: s.networkRoute,
@@ -66,9 +75,12 @@ export class SitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly http: HttpProxyService,
+    @Optional() private readonly aspNet?: AspNetProductClient,
   ) {}
 
-  async list(q: ListSitesQuery): Promise<{ data: SafeSite[]; total: number; page: number; pageSize: number }> {
+  async list(
+    q: ListSitesQuery,
+  ): Promise<{ data: SafeSite[]; total: number; page: number; pageSize: number }> {
     const page = q.page ?? 1;
     const pageSize = Math.min(q.pageSize ?? 25, 100);
     const [total, rows] = await this.prisma.$transaction([
@@ -96,6 +108,7 @@ export class SitesService {
       data: {
         name: dto.name,
         baseUrl: dto.baseUrl,
+        platform: dto.platform ?? SitePlatform.WOOCOMMERCE,
         consumerKeyEncrypted: encrypt(dto.consumerKey),
         consumerSecretEncrypted: encrypt(dto.consumerSecret),
         networkRoute: dto.networkRoute ?? NetworkRoute.DIRECT,
@@ -108,17 +121,25 @@ export class SitesService {
   async update(id: string, dto: UpdateSiteDto): Promise<SafeSite> {
     const existing = await this.prisma.siteConfig.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Site not found');
+    const targetPlatform = dto.platform ?? existing.platform;
+    if (targetPlatform === SitePlatform.NOPCOMMERCE_ASPNET && dto.orderPullEnabled === true) {
+      throw new BadRequestException('Order pull cannot be enabled for an ASP.NET site');
+    }
 
     const data: Record<string, unknown> = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.baseUrl !== undefined) data.baseUrl = dto.baseUrl;
+    if (dto.platform !== undefined) data.platform = dto.platform;
+    if (dto.platform === SitePlatform.NOPCOMMERCE_ASPNET) data.orderPullEnabled = false;
     if (dto.networkRoute !== undefined) data.networkRoute = dto.networkRoute;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.syncEnabled !== undefined) data.syncEnabled = dto.syncEnabled;
     if (dto.orderPullEnabled !== undefined) data.orderPullEnabled = dto.orderPullEnabled;
     if (dto.syncIntervalMs !== undefined) {
       if (dto.syncIntervalMs < 60_000 || dto.syncIntervalMs > 86_400_000) {
-        throw new BadRequestException('syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)');
+        throw new BadRequestException(
+          'syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)',
+        );
       }
       data.syncIntervalMs = dto.syncIntervalMs;
     }
@@ -145,6 +166,42 @@ export class SitesService {
     const s = await this.prisma.siteConfig.findUnique({ where: { id } });
     if (!s) throw new NotFoundException('Site not found');
 
+    if (s.platform === SitePlatform.NOPCOMMERCE_ASPNET) {
+      try {
+        if (!this.aspNet) throw new Error('ASP.NET product connector is not available');
+        const response = await this.aspNet.health(id);
+        const result: TestConnectionResult = {
+          ok: response.body.ok === true,
+          latencyMs: response.latencyMs,
+          routeUsed: response.routeUsed,
+          attempts: response.attempts,
+          status: response.status,
+        };
+        await this.recordSyncLog(s.id, 'test_connection', result.ok ? 'success' : 'failed', {
+          ...result,
+          platform: s.platform,
+          pluginVersion: response.body.pluginVersion,
+        });
+        return result;
+      } catch (err) {
+        const result: TestConnectionResult = {
+          ok: false,
+          latencyMs: 0,
+          routeUsed: s.networkRoute,
+          attempts: 1,
+          error: {
+            code: err instanceof HttpProxyError ? err.code : 'ASPNET_CONNECTION_FAILED',
+            message: (err as Error).message,
+          },
+        };
+        await this.recordSyncLog(s.id, 'test_connection', 'failed', {
+          ...result,
+          platform: s.platform,
+        });
+        return result;
+      }
+    }
+
     let consumerKey = '';
     let consumerSecret = '';
     try {
@@ -163,15 +220,18 @@ export class SitesService {
     }
 
     try {
-      const res = await this.http.request({
-        siteId: s.id,
-        networkRoute: s.networkRoute,
-        baseUrl: s.baseUrl,
-        auth: { username: consumerKey, password: consumerSecret },
-      }, {
-        method: 'GET',
-        path: '/wp-json/wc/v3/products?per_page=1',
-      });
+      const res = await this.http.request(
+        {
+          siteId: s.id,
+          networkRoute: s.networkRoute,
+          baseUrl: s.baseUrl,
+          auth: { username: consumerKey, password: consumerSecret },
+        },
+        {
+          method: 'GET',
+          path: '/wp-json/wc/v3/products?per_page=1',
+        },
+      );
 
       const body = res.body;
       const validJson =
@@ -193,12 +253,7 @@ export class SitesService {
               },
             }),
       };
-      await this.recordSyncLog(
-        s.id,
-        'test_connection',
-        result.ok ? 'success' : 'failed',
-        result,
-      );
+      await this.recordSyncLog(s.id, 'test_connection', result.ok ? 'success' : 'failed', result);
       return result;
     } catch (err) {
       const proxyErr =

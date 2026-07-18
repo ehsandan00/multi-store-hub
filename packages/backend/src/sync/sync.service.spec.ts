@@ -27,9 +27,14 @@ function fakePrisma() {
       findMany: async ({ where, include }: any) => {
         let rows = Array.from(products.values());
         if (where?.id?.in) rows = rows.filter((r: any) => where.id.in.includes(r.id));
+        if (where?.skuMaster?.in) {
+          rows = rows.filter((r: any) => where.skuMaster.in.includes(r.skuMaster));
+        }
         if (where?.siteMappings?.some) {
           rows = rows.filter((r: any) =>
-            Array.from(mappings.values()).some((m: any) => m.productId === r.id && m.siteId === where.siteMappings.some.siteId),
+            Array.from(mappings.values()).some(
+              (m: any) => m.productId === r.id && m.siteId === where.siteMappings.some.siteId,
+            ),
           );
         }
         rows.sort((a: any, b: any) => a.skuMaster.localeCompare(b.skuMaster));
@@ -38,7 +43,10 @@ function fakePrisma() {
           ...r,
           basePrice: { toString: () => r.basePrice.toString() },
           siteMappings: Array.from(mappings.values()).filter(
-            (m: any) => m.productId === r.id && (!include?.siteMappings?.where?.siteId || m.siteId === include.siteMappings.where.siteId),
+            (m: any) =>
+              m.productId === r.id &&
+              (!include?.siteMappings?.where?.siteId ||
+                m.siteId === include.siteMappings.where.siteId),
           ),
         }));
       },
@@ -66,6 +74,20 @@ function fakePrisma() {
           }
         }
         return { count };
+      },
+      upsert: async ({ where, create, update }: any) => {
+        const key = where.productId_siteId;
+        const existing = Array.from(mappings.values()).find(
+          (m: any) => m.productId === key.productId && m.siteId === key.siteId,
+        ) as any;
+        if (existing) {
+          Object.assign(existing, update);
+          return existing;
+        }
+        const id = `m${mappings.size + 1}`;
+        const row = { id, ...create, createdAt: new Date(), updatedAt: new Date() };
+        mappings.set(id, row);
+        return row;
       },
     },
     siteConfig: {
@@ -156,6 +178,7 @@ function makeSite(prisma: any, overrides: any = {}) {
     consumerKeyEncrypted: 'enc-key',
     consumerSecretEncrypted: 'enc-secret',
     networkRoute: 'DIRECT',
+    platform: 'WOOCOMMERCE',
     isActive: true,
     syncEnabled: false,
     syncIntervalMs: 600_000,
@@ -185,7 +208,7 @@ function makeProduct(prisma: any, overrides: any = {}) {
 }
 
 /** Build a SyncService with a mocked WooCommerceClient. */
-function makeService(prisma: any, woo: Partial<WooCommerceClient> = {}): SyncService {
+function makeService(prisma: any, woo: Partial<WooCommerceClient> = {}, aspNet?: any): SyncService {
   const client = {
     findProductsBySku: jest.fn(async () => new Map<string, WcProductRemote>()),
     createProduct: jest.fn(async (_siteId: string, payload: WcProductPayload) => ({
@@ -193,21 +216,31 @@ function makeService(prisma: any, woo: Partial<WooCommerceClient> = {}): SyncSer
       sku: payload.sku,
       name: payload.name,
     })),
-    updateProduct: jest.fn(async (_siteId: string, _id: number, payload: Partial<WcProductPayload>) => ({
-      id: _id,
-      sku: payload.sku,
-      name: payload.name,
-    })),
-    upsertProductBySku: jest.fn(async (siteId: string, payload: WcProductPayload, existing?: WcProductRemote) => {
-      if (existing && existing.id) {
-        return { remote: await (woo.updateProduct ?? client.updateProduct)(siteId, existing.id, payload), created: false };
-      }
-      return { remote: await (woo.createProduct ?? client.createProduct)(siteId, payload), created: true };
-    }),
+    updateProduct: jest.fn(
+      async (_siteId: string, _id: number, payload: Partial<WcProductPayload>) => ({
+        id: _id,
+        sku: payload.sku,
+        name: payload.name,
+      }),
+    ),
+    upsertProductBySku: jest.fn(
+      async (siteId: string, payload: WcProductPayload, existing?: WcProductRemote) => {
+        if (existing && existing.id) {
+          return {
+            remote: await (woo.updateProduct ?? client.updateProduct)(siteId, existing.id, payload),
+            created: false,
+          };
+        }
+        return {
+          remote: await (woo.createProduct ?? client.createProduct)(siteId, payload),
+          created: true,
+        };
+      },
+    ),
     ...woo,
   } as unknown as WooCommerceClient;
   const queue: any = { add: jest.fn(async () => ({ id: 'bq1' })) };
-  return new SyncService(prisma, client, queue);
+  return new SyncService(prisma, client, queue, aspNet);
 }
 
 const user = { id: 'u1', email: 'a@b.c', role: 'ADMIN' as const };
@@ -242,6 +275,153 @@ describe('SyncService.enqueuePush', () => {
   });
 });
 
+describe('SyncService ASP.NET price/stock connector', () => {
+  it('updates matched products without creating remote products', async () => {
+    const prisma = fakePrisma();
+    makeSite(prisma, { platform: 'NOPCOMMERCE_ASPNET' });
+    makeProduct(prisma, {
+      id: 'p1',
+      skuMaster: 'ASP-1',
+      basePrice: new Prisma.Decimal('125000'),
+      totalStock: 8,
+    });
+    prisma._mappings.set('m1', {
+      id: 'm1',
+      productId: 'p1',
+      siteId: 's1',
+      siteSku: 'ASP-1',
+      siteProductId: '3611',
+    });
+    const aspNet = {
+      bulkUpdate: jest.fn(async (_siteId: string, updates: any[]) => ({
+        results: updates.map((update) => ({
+          sourceProductId: update.sourceProductId,
+          sku: update.sku,
+          status: 'updated',
+          remote: {
+            id: update.sourceProductId,
+            sku: update.sku,
+            price: update.price,
+            stockQuantity: update.stockQuantity,
+            kind: 'PRODUCT',
+          },
+        })),
+      })),
+    };
+    const svc = makeService(prisma, {}, aspNet);
+    const queued = await svc.enqueuePush('s1', 'PRICE_STOCK', undefined, user);
+
+    const report = await svc.runPush(queued.id);
+
+    expect(report.created).toBe(0);
+    expect(report.updated).toBe(1);
+    expect(report.failed).toBe(0);
+    expect(aspNet.bulkUpdate).toHaveBeenCalledWith('s1', [
+      { sourceProductId: 3611, sku: 'ASP-1', price: '125000', stockQuantity: 8 },
+    ]);
+  });
+
+  it('dry-run reports source-id, SKU, unresolved, and duplicate matches', async () => {
+    const prisma = fakePrisma();
+    makeSite(prisma, { platform: 'NOPCOMMERCE_ASPNET' });
+    makeProduct(prisma, { id: 'p1', skuMaster: 'BY-ID' });
+    makeProduct(prisma, { id: 'p2', skuMaster: 'BY-SKU' });
+    makeProduct(prisma, { id: 'p3', skuMaster: 'MISSING' });
+    prisma._mappings.set('m1', {
+      id: 'm1',
+      productId: 'p1',
+      siteId: 's1',
+      siteSku: 'BY-ID',
+      siteProductId: '50',
+    });
+    const aspNet = {
+      lookup: jest.fn(async () => ({
+        items: [
+          { id: 50, sku: 'OLD', price: '1', stockQuantity: 1, kind: 'PRODUCT' },
+          { id: 60, sku: 'BY-SKU', price: '2', stockQuantity: 2, kind: 'PRODUCT' },
+        ],
+        unresolvedSourceProductIds: [],
+        unresolvedSkus: ['MISSING'],
+        duplicateSkus: [],
+      })),
+    };
+    const svc = makeService(prisma, {}, aspNet);
+
+    const report = await svc.previewAspNetPriceStock('s1');
+
+    expect(report.matched).toBe(2);
+    expect(report.unresolved).toBe(1);
+    expect(report.items.map((item) => item.status)).toEqual([
+      'matched_by_id',
+      'matched_by_sku',
+      'unresolved',
+    ]);
+  });
+
+  it('imports unique source-id mappings by Hub SKU and skips unresolved rows', async () => {
+    const prisma = fakePrisma();
+    makeSite(prisma, { platform: 'NOPCOMMERCE_ASPNET' });
+    makeProduct(prisma, { id: 'p1', skuMaster: 'KNOWN' });
+    const svc = makeService(prisma, {}, { lookup: jest.fn(), bulkUpdate: jest.fn() });
+
+    const result = await svc.importAspNetMappings('s1', [
+      { sourceProductId: 3611, sku: 'KNOWN' },
+      { sourceProductId: 3612, sku: 'UNKNOWN' },
+    ]);
+
+    expect(result).toEqual({ imported: 1, unresolved: 1, duplicates: 0 });
+    expect(Array.from(prisma._mappings.values())[0]).toMatchObject({
+      productId: 'p1',
+      siteId: 's1',
+      siteProductId: '3611',
+      siteSku: 'KNOWN',
+    });
+  });
+
+  it('namespaces variation combination ids so they cannot collide with Product.Id', async () => {
+    const prisma = fakePrisma();
+    makeSite(prisma, { platform: 'NOPCOMMERCE_ASPNET' });
+    makeProduct(prisma, { id: 'variation-1', skuMaster: 'VAR-RED' });
+    const aspNet = {
+      bulkUpdate: jest.fn(async (_siteId: string, _updates: any[]) => ({
+        results: [
+          {
+            sku: 'VAR-RED',
+            status: 'updated',
+            remote: {
+              id: 77,
+              sku: 'VAR-RED',
+              price: '9.99',
+              stockQuantity: 10,
+              kind: 'COMBINATION',
+              parentProductId: 12,
+            },
+          },
+        ],
+      })),
+    };
+    const svc = makeService(prisma, {}, aspNet);
+    const queued = await svc.enqueuePush('s1', 'PRICE_STOCK', undefined, user);
+
+    await svc.runPush(queued.id);
+
+    expect(Array.from(prisma._mappings.values())[0]).toMatchObject({
+      productId: 'variation-1',
+      siteProductId: 'combination:77',
+    });
+
+    const second = await svc.enqueuePush('s1', 'PRICE_STOCK', undefined, user);
+    await svc.runPush(second.id);
+    expect(aspNet.bulkUpdate).toHaveBeenLastCalledWith('s1', [
+      expect.objectContaining({
+        sourceProductId: undefined,
+        sourceCombinationId: 77,
+        sku: 'VAR-RED',
+      }),
+    ]);
+  });
+});
+
 describe('SyncService.runPush (idempotent hub → site)', () => {
   let prisma: any;
   let svc: SyncService;
@@ -254,8 +434,16 @@ describe('SyncService.runPush (idempotent hub → site)', () => {
     makeProduct(prisma, { id: 'p2', skuMaster: 'B-2', name: 'Beta', totalStock: 0 });
     woo = {
       findProductsBySku: jest.fn(async () => new Map<string, WcProductRemote>()),
-      createProduct: jest.fn(async (_s: string, p: WcProductPayload) => ({ id: 5001, sku: p.sku, name: p.name })),
-      updateProduct: jest.fn(async (_s: string, id: number, p: Partial<WcProductPayload>) => ({ id, sku: p.sku, name: p.name })),
+      createProduct: jest.fn(async (_s: string, p: WcProductPayload) => ({
+        id: 5001,
+        sku: p.sku,
+        name: p.name,
+      })),
+      updateProduct: jest.fn(async (_s: string, id: number, p: Partial<WcProductPayload>) => ({
+        id,
+        sku: p.sku,
+        name: p.name,
+      })),
     };
     svc = makeService(prisma, woo);
   });
@@ -370,9 +558,16 @@ describe('SyncService.runPush (idempotent hub → site)', () => {
 
   it('scope=MAPPING only pushes products that already have a mapping', async () => {
     prisma._mappings.set('m1', {
-      id: 'm1', productId: 'p1', siteId: 's1', siteSku: 'A-1', siteProductId: '99',
-      siteSpecificTitle: null, matchStatus: 'APPROVED', lastSyncedAt: null,
-      createdAt: new Date(), updatedAt: new Date(),
+      id: 'm1',
+      productId: 'p1',
+      siteId: 's1',
+      siteSku: 'A-1',
+      siteProductId: '99',
+      siteSpecificTitle: null,
+      matchStatus: 'APPROVED',
+      lastSyncedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
     const { id } = await svc.enqueuePush('s1', 'MAPPING');
     const report = await svc.runPush(id);
@@ -396,12 +591,18 @@ describe('SyncService schedule config + queries', () => {
     expect(res.syncEnabled).toBe(true);
     expect(res.syncIntervalMs).toBe(300_000);
     expect(prisma._sites.get('s1').syncEnabled).toBe(true);
-    await expect(svc.updateSiteSchedule('s1', { syncIntervalMs: 10 })).rejects.toThrow(BadRequestException);
-    await expect(svc.updateSiteSchedule('s1', { syncIntervalMs: 100_000_000 })).rejects.toThrow(BadRequestException);
+    await expect(svc.updateSiteSchedule('s1', { syncIntervalMs: 10 })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(svc.updateSiteSchedule('s1', { syncIntervalMs: 100_000_000 })).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('updateSiteSchedule throws NotFound for an unknown site', async () => {
-    await expect(svc.updateSiteSchedule('ghost', { syncEnabled: true })).rejects.toThrow(NotFoundException);
+    await expect(svc.updateSiteSchedule('ghost', { syncEnabled: true })).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('getJob throws NotFound for an unknown id', async () => {

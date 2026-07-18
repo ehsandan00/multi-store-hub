@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NopCommerceRoot Condition="'$(NopCommerceRoot)' == ''">..\..\..\..\nopCommerce</NopCommerceRoot>
+    <OutputPath>$(NopCommerceRoot)\src\Presentation\Nop.Web\Plugins\Misc.MultiStoreHub\</OutputPath>
+    <OutDir>$(OutputPath)</OutDir>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(NopCommerceRoot)\src\Libraries\Nop.Core\Nop.Core.csproj" Private="false" />
+    <ProjectReference Include="$(NopCommerceRoot)\src\Libraries\Nop.Data\Nop.Data.csproj" Private="false" />
+    <ProjectReference Include="$(NopCommerceRoot)\src\Libraries\Nop.Services\Nop.Services.csproj" Private="false" />
+    <ProjectReference Include="$(NopCommerceRoot)\src\Presentation\Nop.Web.Framework\Nop.Web.Framework.csproj" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

@@ -11,6 +11,7 @@ const directSite: SafeSite = {
   id: 's1',
   name: 'Demo IR store',
   baseUrl: 'https://demo.example.ir',
+  platform: 'WOOCOMMERCE',
   consumerKeyMasked: '••••key1',
   consumerSecretMasked: '••••sec1',
   networkRoute: 'DIRECT',
@@ -74,9 +75,22 @@ describe('SiteFormModal network route', () => {
     await user.click(screen.getByRole('button', { name: /ذخیره تغییرات/i }));
 
     await waitFor(() =>
-      expect(updateSpy).toHaveBeenCalledWith('s1', expect.objectContaining({
-        networkRoute: 'VIA_FOREIGN_PROXY',
-      })),
+      expect(updateSpy).toHaveBeenCalledWith(
+        's1',
+        expect.objectContaining({
+          networkRoute: 'VIA_FOREIGN_PROXY',
+        }),
+      ),
     );
+  });
+
+  it('shows ASP.NET API credential labels when the platform changes', async () => {
+    const user = userEvent.setup();
+    renderForm(null);
+
+    await user.selectOptions(screen.getByLabelText(/نوع فروشگاه/i), 'NOPCOMMERCE_ASPNET');
+
+    expect(screen.getByLabelText(/کلید API افزونه ASP.NET/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/رمز امضای API افزونه ASP.NET/i)).toBeInTheDocument();
   });
 });

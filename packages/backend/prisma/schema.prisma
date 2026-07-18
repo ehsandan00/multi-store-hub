@@ -30,6 +30,11 @@ enum NetworkRoute {
   VIA_FOREIGN_PROXY
 }
 
+enum SitePlatform {
+  WOOCOMMERCE
+  NOPCOMMERCE_ASPNET
+}
+
 enum MatchStatus {
   PENDING_REVIEW
   APPROVED
@@ -195,6 +200,7 @@ model SiteConfig {
   id                      String       @id @default(uuid())
   name                    String
   baseUrl                 String
+  platform                SitePlatform @default(WOOCOMMERCE)
   consumerKeyEncrypted    String
   consumerSecretEncrypted String
   networkRoute            NetworkRoute @default(DIRECT)
@@ -222,6 +228,7 @@ model SiteConfig {
   inventoryLogs InventoryLog[]
 
   @@index([isActive])
+  @@index([platform])
   @@index([syncEnabled])
   @@index([orderPullEnabled])
 }

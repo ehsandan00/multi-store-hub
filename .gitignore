@@ -47,5 +47,8 @@ packages/backend/**/*.sqlite-journal
 # Hub-only product photos (never synced to stores)
 packages/backend/data/hub-photos/
 
+# Generated ASP.NET backup discovery exports (may contain commercial catalog data)
+integrations/aspnet-product-sync/discovery/artifacts/
+
 .turbo/
 *.pem

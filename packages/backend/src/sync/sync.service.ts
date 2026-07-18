@@ -3,8 +3,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { Prisma, ProductType } from '@prisma/client';
+import { Prisma, ProductType, SitePlatform } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +21,12 @@ import type {
   WcProductRemote,
 } from './sync.types';
 import { SYNC_QUEUE_NAME } from './sync.types';
+import { AspNetProductClient } from './aspnet-product.client';
+import type {
+  AspNetDryRunReport,
+  AspNetPriceStockUpdate,
+  AspNetUpdateResult,
+} from './aspnet-product.types';
 
 /**
  * Orchestrates WooCommerce sync (Phase 3: hub → site push only).
@@ -51,6 +58,7 @@ export class SyncService {
     private readonly prisma: PrismaService,
     private readonly woo: WooCommerceClient,
     @InjectQueue(SYNC_QUEUE_NAME) private readonly syncQueue: Queue,
+    @Optional() private readonly aspNet?: AspNetProductClient,
   ) {}
 
   // ─── Enqueue ──────────────────────────────────────────────────────────────
@@ -68,12 +76,10 @@ export class SyncService {
   ): Promise<{ id: string; status: string; queued: boolean }> {
     const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
-    if (!site.isActive) throw new BadRequestException('Site is inactive; enable it before syncing.');
+    if (!site.isActive)
+      throw new BadRequestException('Site is inactive; enable it before syncing.');
 
-    const payload =
-      scope === 'PRODUCT_IDS' && productIds?.length
-        ? { productIds }
-        : undefined;
+    const payload = scope === 'PRODUCT_IDS' && productIds?.length ? { productIds } : undefined;
 
     const job = await this.prisma.syncJob.create({
       data: {
@@ -116,63 +122,85 @@ export class SyncService {
     let routeUsed = 'DIRECT';
 
     try {
-      const items = await this.resolvePushItems(job.siteId, job.scope as SyncScope, job.payload as any);
-      // First, look up all remote products by SKU in one batched pass so the
-      // per-item upsert can PUT when a mapping is missing/stale.
-      const allSkus = items.map((i) => i.siteSku || i.skuMaster);
-      let remoteBySku = new Map<string, WcProductRemote>();
-      try {
-        remoteBySku = await this.woo.findProductsBySku(job.siteId, allSkus);
-        // Capture route used from a cheap probe — the lookup itself used the
-        // site's route; we infer it from the site config.
-        const site = await this.prisma.siteConfig.findUnique({ where: { id: job.siteId } });
-        routeUsed = site?.networkRoute ?? 'DIRECT';
-      } catch (err) {
-        // Lookup failed (network/proxy). We still attempt per-item pushes —
-        // for items with a cached siteProductId we can PUT without lookup.
-        this.logger.warn(
-          `WC SKU lookup failed for site ${job.siteId}: ${(err as Error).message}. Falling back to cached mapping + create.`,
-        );
-      }
+      const items = await this.resolvePushItems(
+        job.siteId,
+        job.scope as SyncScope,
+        job.payload as any,
+      );
+      const site = await this.prisma.siteConfig.findUnique({ where: { id: job.siteId } });
+      if (!site) throw new NotFoundException('Site not found');
+      routeUsed = site.networkRoute;
 
-      for (const item of items) {
+      if (site.platform === SitePlatform.NOPCOMMERCE_ASPNET) {
+        const result = await this.pushAspNetPriceStock(job.siteId, items);
+        pushed = result.pushed;
+        updated = result.updated;
+        failed = result.failed;
+        errors.push(...result.errors);
+      } else {
+        // First, look up all remote products by SKU in one batched pass so the
+        // per-item upsert can PUT when a mapping is missing/stale.
+        const allSkus = items.map((i) => i.siteSku || i.skuMaster);
+        let remoteBySku = new Map<string, WcProductRemote>();
         try {
-          const sku = item.siteSku || item.skuMaster;
-          const existing =
-            item.siteProductId
-              ? { id: Number(item.siteProductId), sku }
-              : remoteBySku.get(sku) ?? undefined;
-          const payload = this.toWcPayload(item);
-          const { remote, created: didCreate } = await this.woo.upsertProductBySku(
-            job.siteId,
-            payload,
-            existing,
-          );
-          pushed += 1;
-          if (didCreate) created += 1;
-          else updated += 1;
-
-          // Cache the remote id + site SKU on the mapping (upsert mapping row).
-          await this.upsertMapping(job.siteId, item, remote, didCreate);
+          remoteBySku = await this.woo.findProductsBySku(job.siteId, allSkus);
+          // Capture route used from a cheap probe — the lookup itself used the
+          // site's route; we infer it from the site config.
+          routeUsed = site.networkRoute;
         } catch (err) {
-          failed += 1;
-          const code =
-            err instanceof HttpProxyError ? err.code : (err as any)?.code ?? 'UNKNOWN';
-          const statusCode = (err as any)?.statusCode;
-          errors.push({
-            sku: item.siteSku || item.skuMaster,
-            message: (err as Error).message ?? 'Unknown error',
-            code,
-            statusCode,
-          });
+          // Lookup failed (network/proxy). We still attempt per-item pushes —
+          // for items with a cached siteProductId we can PUT without lookup.
           this.logger.warn(
-            `Push failed for sku=${item.siteSku || item.skuMaster} on site ${job.siteId}: ${(err as Error).message}`,
+            `WC SKU lookup failed for site ${job.siteId}: ${(err as Error).message}. Falling back to cached mapping + create.`,
           );
+        }
+
+        for (const item of items) {
+          try {
+            const sku = item.siteSku || item.skuMaster;
+            const existing = item.siteProductId
+              ? { id: Number(item.siteProductId), sku }
+              : (remoteBySku.get(sku) ?? undefined);
+            const payload = this.toWcPayload(item);
+            const { remote, created: didCreate } = await this.woo.upsertProductBySku(
+              job.siteId,
+              payload,
+              existing,
+            );
+            pushed += 1;
+            if (didCreate) created += 1;
+            else updated += 1;
+
+            // Cache the remote id + site SKU on the mapping (upsert mapping row).
+            await this.upsertMapping(job.siteId, item, remote, didCreate);
+          } catch (err) {
+            failed += 1;
+            const code =
+              err instanceof HttpProxyError ? err.code : ((err as any)?.code ?? 'UNKNOWN');
+            const statusCode = (err as any)?.statusCode;
+            errors.push({
+              sku: item.siteSku || item.skuMaster,
+              message: (err as Error).message ?? 'Unknown error',
+              code,
+              statusCode,
+            });
+            this.logger.warn(
+              `Push failed for sku=${item.siteSku || item.skuMaster} on site ${job.siteId}: ${(err as Error).message}`,
+            );
+          }
         }
       }
     } catch (fatal) {
       this.logger.error(`Fatal error in sync job ${syncJobId}: ${(fatal as Error).message}`);
-      await this.markFailed(syncJobId, pushed, failed, errors, startedAt, routeUsed, fatal as Error);
+      await this.markFailed(
+        syncJobId,
+        pushed,
+        failed,
+        errors,
+        startedAt,
+        routeUsed,
+        fatal as Error,
+      );
       throw fatal;
     }
 
@@ -189,6 +217,237 @@ export class SyncService {
     };
     await this.finalize(syncJobId, report, finishedAt);
     return report;
+  }
+
+  async previewAspNetPriceStock(
+    siteId: string,
+    scope: SyncScope = 'PRICE_STOCK',
+    productIds?: string[],
+  ): Promise<AspNetDryRunReport> {
+    const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
+    if (!site) throw new NotFoundException('Site not found');
+    if (site.platform !== SitePlatform.NOPCOMMERCE_ASPNET) {
+      throw new BadRequestException(
+        'Dry-run price/stock preview is only available for ASP.NET sites',
+      );
+    }
+    if (!this.aspNet) throw new Error('ASP.NET product connector is not available');
+
+    const items = await this.resolvePushItems(
+      siteId,
+      scope,
+      productIds?.length ? { productIds } : null,
+    );
+    const sourceProductIds = items
+      .map((item) => this.numericSourceId(item.siteProductId))
+      .filter((id): id is number => id !== null);
+    const sourceCombinationIds = items
+      .map((item) => this.combinationSourceId(item.siteProductId))
+      .filter((id): id is number => id !== null);
+    const skus = items.map((item) => item.siteSku || item.skuMaster);
+    const lookup = await this.aspNet.lookup(siteId, {
+      sourceProductIds,
+      sourceCombinationIds,
+      skus,
+    });
+    const productsById = new Map(
+      lookup.items
+        .filter((remote) => remote.kind === 'PRODUCT')
+        .map((remote) => [remote.id, remote]),
+    );
+    const combinationsById = new Map(
+      lookup.items
+        .filter((remote) => remote.kind === 'COMBINATION')
+        .map((remote) => [remote.id, remote]),
+    );
+    const bySku = new Map(
+      lookup.items
+        .filter((remote) => remote.sku)
+        .map((remote) => [remote.sku!.toLocaleLowerCase(), remote]),
+    );
+    const duplicateSkus = new Set(lookup.duplicateSkus.map((sku) => sku.toLocaleLowerCase()));
+
+    const reportItems = items.map((item) => {
+      const sku = item.siteSku || item.skuMaster;
+      const sourceProductId = this.numericSourceId(item.siteProductId);
+      const sourceCombinationId = this.combinationSourceId(item.siteProductId);
+      const remoteById =
+        sourceProductId !== null
+          ? productsById.get(sourceProductId)
+          : sourceCombinationId !== null
+            ? combinationsById.get(sourceCombinationId)
+            : undefined;
+      const remoteBySku = bySku.get(sku.toLocaleLowerCase());
+      const duplicate = !remoteById && duplicateSkus.has(sku.toLocaleLowerCase());
+      const remote = remoteById ?? remoteBySku;
+      const status = duplicate
+        ? ('duplicate' as const)
+        : remoteById
+          ? ('matched_by_id' as const)
+          : remoteBySku
+            ? ('matched_by_sku' as const)
+            : ('unresolved' as const);
+      return {
+        productId: item.productId,
+        sku,
+        sourceProductId,
+        sourceCombinationId,
+        status,
+        remote,
+        wouldUpdate: remote ? { price: item.basePrice, stockQuantity: item.totalStock } : undefined,
+      };
+    });
+
+    return {
+      siteId,
+      total: reportItems.length,
+      matched: reportItems.filter((item) => item.status.startsWith('matched_')).length,
+      unresolved: reportItems.filter((item) => item.status === 'unresolved').length,
+      duplicate: reportItems.filter((item) => item.status === 'duplicate').length,
+      items: reportItems,
+    };
+  }
+
+  async importAspNetMappings(
+    siteId: string,
+    rows: {
+      sourceProductId: number;
+      sourceKind?: 'PRODUCT' | 'COMBINATION';
+      sku: string;
+    }[],
+  ): Promise<{ imported: number; unresolved: number; duplicates: number }> {
+    const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
+    if (!site) throw new NotFoundException('Site not found');
+    if (site.platform !== SitePlatform.NOPCOMMERCE_ASPNET) {
+      throw new BadRequestException('ASP.NET mappings can only be imported for an ASP.NET site');
+    }
+
+    const normalized = rows
+      .map((row) => ({
+        sourceProductId: row.sourceProductId,
+        sourceKind: row.sourceKind ?? ('PRODUCT' as const),
+        sku: row.sku.trim(),
+      }))
+      .filter((row) => Number.isInteger(row.sourceProductId) && row.sourceProductId > 0 && row.sku);
+    const duplicateSkus = new Set<string>();
+    const seen = new Set<string>();
+    for (const row of normalized) {
+      const sku = row.sku.toLocaleLowerCase();
+      if (seen.has(sku)) duplicateSkus.add(sku);
+      seen.add(sku);
+    }
+
+    const products = await this.prisma.product.findMany({
+      select: { id: true, skuMaster: true },
+    });
+    const productBySku = new Map(
+      products.map((product) => [product.skuMaster.toLocaleLowerCase(), product]),
+    );
+    let imported = 0;
+    let unresolved = 0;
+
+    for (const row of normalized) {
+      const normalizedSku = row.sku.toLocaleLowerCase();
+      const product = productBySku.get(normalizedSku);
+      if (!product || duplicateSkus.has(normalizedSku)) {
+        unresolved += 1;
+        continue;
+      }
+      await this.prisma.siteProductMapping.upsert({
+        where: { productId_siteId: { productId: product.id, siteId } },
+        create: {
+          productId: product.id,
+          siteId,
+          siteSku: row.sku,
+          siteProductId:
+            row.sourceKind === 'COMBINATION'
+              ? `combination:${row.sourceProductId}`
+              : String(row.sourceProductId),
+          matchStatus: 'APPROVED',
+        },
+        update: {
+          siteSku: row.sku,
+          siteProductId:
+            row.sourceKind === 'COMBINATION'
+              ? `combination:${row.sourceProductId}`
+              : String(row.sourceProductId),
+          matchStatus: 'APPROVED',
+        },
+      });
+      imported += 1;
+    }
+
+    return { imported, unresolved, duplicates: duplicateSkus.size };
+  }
+
+  private async pushAspNetPriceStock(siteId: string, items: ResolvedPushItem[]) {
+    if (!this.aspNet) throw new Error('ASP.NET product connector is not available');
+    const updates: AspNetPriceStockUpdate[] = items.map((item) => {
+      const sourceProductId = this.numericSourceId(item.siteProductId);
+      const sourceCombinationId = this.combinationSourceId(item.siteProductId);
+      return {
+        sourceProductId: sourceProductId ?? undefined,
+        sourceCombinationId: sourceCombinationId ?? undefined,
+        sku: item.siteSku || item.skuMaster,
+        price: item.basePrice,
+        stockQuantity: item.totalStock,
+      };
+    });
+    const response = await this.aspNet.bulkUpdate(siteId, updates);
+    const resultsById = new Map<number, AspNetUpdateResult>();
+    const resultsByCombinationId = new Map<number, AspNetUpdateResult>();
+    const resultsBySku = new Map<string, AspNetUpdateResult>();
+    for (const result of response.results) {
+      if (result.sourceProductId !== undefined) resultsById.set(result.sourceProductId, result);
+      if (result.sourceCombinationId !== undefined) {
+        resultsByCombinationId.set(result.sourceCombinationId, result);
+      }
+      if (result.sku) resultsBySku.set(result.sku.toLocaleLowerCase(), result);
+    }
+
+    let pushed = 0;
+    let updated = 0;
+    let failed = 0;
+    const errors: SyncItemError[] = [];
+    for (const item of items) {
+      const sku = item.siteSku || item.skuMaster;
+      const sourceProductId = this.numericSourceId(item.siteProductId);
+      const sourceCombinationId = this.combinationSourceId(item.siteProductId);
+      const result =
+        (sourceProductId === null ? undefined : resultsById.get(sourceProductId)) ??
+        (sourceCombinationId === null
+          ? undefined
+          : resultsByCombinationId.get(sourceCombinationId)) ??
+        resultsBySku.get(sku.toLocaleLowerCase());
+      if (result?.status === 'updated' && result.remote) {
+        pushed += 1;
+        updated += 1;
+        await this.upsertMapping(siteId, item, result.remote, false);
+      } else {
+        failed += 1;
+        errors.push({
+          sku,
+          sourceProductId: sourceProductId ?? undefined,
+          sourceCombinationId: sourceCombinationId ?? undefined,
+          code: result?.status?.toUpperCase() ?? 'NO_RESULT',
+          message: result?.message ?? 'ASP.NET site did not return a result for this product',
+        });
+      }
+    }
+    return { pushed, updated, failed, errors };
+  }
+
+  private numericSourceId(value: string | null): number | null {
+    if (!value || !/^\d+$/.test(value)) return null;
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+
+  private combinationSourceId(value: string | null): number | null {
+    const match = value?.match(/^combination:(\d+)$/);
+    if (!match) return null;
+    const id = Number(match[1]);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
   }
 
   // ─── Resolve which hub products to push for this site ─────────────────────
@@ -276,13 +535,13 @@ export class SyncService {
   private async upsertMapping(
     siteId: string,
     item: ResolvedPushItem,
-    remote: WcProductRemote,
+    remote: { id: number; sku?: string | null; kind?: 'PRODUCT' | 'COMBINATION' },
     _created: boolean,
   ): Promise<void> {
     const siteSku = item.siteSku || item.skuMaster;
     const data = {
       siteSku,
-      siteProductId: String(remote.id),
+      siteProductId: remote.kind === 'COMBINATION' ? `combination:${remote.id}` : String(remote.id),
       lastSyncedAt: new Date(),
       // APPROVED because a successful push confirms the mapping is correct.
       matchStatus: item.mappingId ? undefined : ('APPROVED' as const),
@@ -290,7 +549,11 @@ export class SyncService {
     if (item.mappingId) {
       await this.prisma.siteProductMapping.update({
         where: { id: item.mappingId },
-        data: { siteSku: data.siteSku, siteProductId: data.siteProductId, lastSyncedAt: data.lastSyncedAt },
+        data: {
+          siteSku: data.siteSku,
+          siteProductId: data.siteProductId,
+          lastSyncedAt: data.lastSyncedAt,
+        },
       });
     } else {
       // Create a mapping row for next time; unique on (productId, siteId).
@@ -300,7 +563,7 @@ export class SyncService {
             productId: item.productId,
             siteId,
             siteSku,
-            siteProductId: String(remote.id),
+            siteProductId: data.siteProductId,
             siteSpecificTitle: item.siteSpecificTitle,
             matchStatus: 'APPROVED',
             lastSyncedAt: new Date(),
@@ -310,7 +573,7 @@ export class SyncService {
         // Race: another concurrent push created it first. Update instead.
         await this.prisma.siteProductMapping.updateMany({
           where: { productId: item.productId, siteId },
-          data: { siteSku, siteProductId: String(remote.id), lastSyncedAt: new Date() },
+          data: { siteSku, siteProductId: data.siteProductId, lastSyncedAt: new Date() },
         });
       }
     }
@@ -322,46 +585,50 @@ export class SyncService {
     const status = report.failed === 0 ? 'success' : report.pushed === 0 ? 'failed' : 'partial';
     const job = await this.prisma.syncJob.findUnique({ where: { id: syncJobId } });
 
-    await this.prisma.$transaction([
-      this.prisma.syncJob.update({
-        where: { id: syncJobId },
-        data: {
-          status: 'COMPLETED',
-          totalItems: report.pushed + report.failed,
-          pushedCount: report.pushed,
-          failedCount: report.failed,
-          report: report as unknown as Prisma.InputJsonValue,
-          errors: errorsToJson(report.errors),
-          finishedAt,
-        },
-      }),
-      this.prisma.syncLog.create({
-        data: {
-          siteId: job?.siteId ?? '',
-          syncType: 'product_push',
-          status,
-          details: { syncJobId, ...report } as unknown as Prisma.InputJsonValue,
-        },
-      }),
-      this.prisma.siteConfig.update({
-        where: { id: job?.siteId ?? '' },
-        data: { lastSyncAt: finishedAt },
-      }),
-    ]).catch(async (err) => {
-      // If the transaction fails (e.g. transient), still try to mark the job.
-      this.logger.warn(`Finalize transaction failed: ${(err as Error).message}`);
-      await this.prisma.syncJob.update({
-        where: { id: syncJobId },
-        data: {
-          status: 'COMPLETED',
-          totalItems: report.pushed + report.failed,
-          pushedCount: report.pushed,
-          failedCount: report.failed,
-          report: report as unknown as Prisma.InputJsonValue,
-          finishedAt,
-        },
-      }).catch(() => undefined);
-    });
+    await this.prisma
+      .$transaction([
+        this.prisma.syncJob.update({
+          where: { id: syncJobId },
+          data: {
+            status: 'COMPLETED',
+            totalItems: report.pushed + report.failed,
+            pushedCount: report.pushed,
+            failedCount: report.failed,
+            report: report as unknown as Prisma.InputJsonValue,
+            errors: errorsToJson(report.errors),
+            finishedAt,
+          },
+        }),
+        this.prisma.syncLog.create({
+          data: {
+            siteId: job?.siteId ?? '',
+            syncType: 'product_push',
+            status,
+            details: { syncJobId, ...report } as unknown as Prisma.InputJsonValue,
+          },
+        }),
+        this.prisma.siteConfig.update({
+          where: { id: job?.siteId ?? '' },
+          data: { lastSyncAt: finishedAt },
+        }),
+      ])
+      .catch(async (err) => {
+        // If the transaction fails (e.g. transient), still try to mark the job.
+        this.logger.warn(`Finalize transaction failed: ${(err as Error).message}`);
+        await this.prisma.syncJob
+          .update({
+            where: { id: syncJobId },
+            data: {
+              status: 'COMPLETED',
+              totalItems: report.pushed + report.failed,
+              pushedCount: report.pushed,
+              failedCount: report.failed,
+              report: report as unknown as Prisma.InputJsonValue,
+              finishedAt,
+            },
+          })
+          .catch(() => undefined);
+      });
   }
 
   private async markFailed(
@@ -402,7 +669,11 @@ export class SyncService {
             siteId: job?.siteId ?? '',
             syncType: 'product_push',
             status: 'failed',
-            details: { syncJobId, fatal: cause.message, ...report } as unknown as Prisma.InputJsonValue,
+            details: {
+              syncJobId,
+              fatal: cause.message,
+              ...report,
+            } as unknown as Prisma.InputJsonValue,
           },
         }),
       ]);
@@ -483,12 +754,17 @@ export class SyncService {
   ): Promise<{ syncEnabled: boolean; syncIntervalMs: number; orderPullEnabled: boolean }> {
     const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
+    if (site.platform === SitePlatform.NOPCOMMERCE_ASPNET && input.orderPullEnabled === true) {
+      throw new BadRequestException('Order pull cannot be enabled for an ASP.NET site');
+    }
     const data: Prisma.SiteConfigUpdateInput = {};
     if (input.syncEnabled !== undefined) data.syncEnabled = input.syncEnabled;
     if (input.orderPullEnabled !== undefined) data.orderPullEnabled = input.orderPullEnabled;
     if (input.syncIntervalMs !== undefined) {
       if (input.syncIntervalMs < 60_000 || input.syncIntervalMs > 86_400_000) {
-        throw new BadRequestException('syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)');
+        throw new BadRequestException(
+          'syncIntervalMs must be between 60000 and 86400000 (1 min – 24 h)',
+        );
       }
       data.syncIntervalMs = input.syncIntervalMs;
     }

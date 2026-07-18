@@ -1,0 +1,11 @@
+{
+  "Group": "Misc",
+  "FriendlyName": "Multi-Store Hub Product Sync",
+  "SystemName": "Misc.MultiStoreHub",
+  "Version": "1.0.0",
+  "SupportedVersions": [ "4.70" ],
+  "Author": "Multi-Store Hub",
+  "DisplayOrder": 1,
+  "FileName": "Nop.Plugin.Misc.MultiStoreHub.dll",
+  "Description": "Authenticated product price and stock synchronization endpoints for Multi-Store Hub."
+}

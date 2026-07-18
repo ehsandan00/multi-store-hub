@@ -1,10 +1,5 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, SitePlatform } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,7 +69,13 @@ export class OrderPullService {
   ): Promise<{ id: string; status: string; queued: boolean }> {
     const site = await this.prisma.siteConfig.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
-    if (!site.isActive) throw new BadRequestException('Site is inactive; enable it before pulling.');
+    if (!site.isActive)
+      throw new BadRequestException('Site is inactive; enable it before pulling.');
+    if (site.platform === SitePlatform.NOPCOMMERCE_ASPNET) {
+      throw new BadRequestException(
+        'Order pull is currently available only for WooCommerce sites.',
+      );
+    }
 
     const job = await this.prisma.syncJob.create({
       data: {
@@ -144,7 +145,8 @@ export class OrderPullService {
             if (mod && (!newestModified || mod > newestModified)) newestModified = mod;
           } catch (err) {
             failed += 1;
-            const code = err instanceof HttpProxyError ? err.code : (err as any)?.code ?? 'UNKNOWN';
+            const code =
+              err instanceof HttpProxyError ? err.code : ((err as any)?.code ?? 'UNKNOWN');
             errors.push({
               remoteOrderId: remote.id,
               orderNumber: remote.number ?? String(remote.id),
@@ -164,7 +166,16 @@ export class OrderPullService {
       }
     } catch (fatal) {
       this.logger.error(`Fatal error in order pull job ${syncJobId}: ${(fatal as Error).message}`);
-      await this.markFailed(syncJobId, pulled, failed, errors, startedAt, routeUsed, newestModified, fatal as Error);
+      await this.markFailed(
+        syncJobId,
+        pulled,
+        failed,
+        errors,
+        startedAt,
+        routeUsed,
+        newestModified,
+        fatal as Error,
+      );
       throw fatal;
     }
 
@@ -190,10 +201,7 @@ export class OrderPullService {
    * Upserts an order by `(siteId, remoteOrderId)`. Replaces line items and
    * re-links the customer. Returns `{ created }` so the caller can tally.
    */
-  private async upsertOrder(
-    siteId: string,
-    remote: WcOrderRemote,
-  ): Promise<{ created: boolean }> {
+  private async upsertOrder(siteId: string, remote: WcOrderRemote): Promise<{ created: boolean }> {
     const existing = await this.prisma.order.findUnique({
       where: { siteId_remoteOrderId: { siteId, remoteOrderId: remote.id } },
       select: { id: true },
@@ -272,11 +280,16 @@ export class OrderPullService {
       if (existing) {
         // Refresh contact details if the order carries newer info.
         if (email || name || billing?.phone) {
-          await this.prisma.customer.update({ where: { id: existing.id }, data: {
-            email: email ?? undefined,
-            name: name ?? undefined,
-            phone: billing?.phone ?? undefined,
-          } }).catch(() => undefined);
+          await this.prisma.customer
+            .update({
+              where: { id: existing.id },
+              data: {
+                email: email ?? undefined,
+                name: name ?? undefined,
+                phone: billing?.phone ?? undefined,
+              },
+            })
+            .catch(() => undefined);
         }
         return existing.id;
       }
@@ -290,9 +303,14 @@ export class OrderPullService {
       });
       if (byEmail) {
         if (remoteCustomerId > 0) {
-          await this.prisma.customer.update({ where: { id: byEmail.id }, data: {
-            remoteCustomerId,
-          } }).catch(() => undefined);
+          await this.prisma.customer
+            .update({
+              where: { id: byEmail.id },
+              data: {
+                remoteCustomerId,
+              },
+            })
+            .catch(() => undefined);
         }
         return byEmail.id;
       }
@@ -372,48 +390,54 @@ export class OrderPullService {
     const status = report.failed === 0 ? 'success' : report.pulled === 0 ? 'failed' : 'partial';
     const job = await this.prisma.syncJob.findUnique({ where: { id: syncJobId } });
 
-    await this.prisma.$transaction([
-      this.prisma.syncJob.update({
-        where: { id: syncJobId },
-        data: {
-          status: 'COMPLETED',
-          totalItems: report.pulled + report.failed,
-          pushedCount: report.pulled, // reuse pushedCount as "pulled" for PULL jobs
-          failedCount: report.failed,
-          report: report as unknown as Prisma.InputJsonValue,
-          errors: report.errors as unknown as Prisma.InputJsonValue,
-          finishedAt,
-        },
-      }),
-      this.prisma.syncLog.create({
-        data: {
-          siteId: job?.siteId ?? '',
-          syncType: 'order_pull',
-          status,
-          details: { syncJobId, ...report } as unknown as Prisma.InputJsonValue,
-        },
-      }),
-      // Advance the incremental cursor only when we observed a newer modified date.
-      ...(newestModified
-        ? [this.prisma.siteConfig.update({
-            where: { id: job?.siteId ?? '' },
-            data: { lastOrderPullAt: newestModified },
-          })]
-        : []),
-    ]).catch(async (err) => {
-      this.logger.warn(`Finalize transaction failed: ${(err as Error).message}`);
-      await this.prisma.syncJob.update({
-        where: { id: syncJobId },
-        data: {
-          status: 'COMPLETED',
-          totalItems: report.pulled + report.failed,
-          pushedCount: report.pulled,
-          failedCount: report.failed,
-          report: report as unknown as Prisma.InputJsonValue,
-          finishedAt,
-        },
-      }).catch(() => undefined);
-    });
+    await this.prisma
+      .$transaction([
+        this.prisma.syncJob.update({
+          where: { id: syncJobId },
+          data: {
+            status: 'COMPLETED',
+            totalItems: report.pulled + report.failed,
+            pushedCount: report.pulled, // reuse pushedCount as "pulled" for PULL jobs
+            failedCount: report.failed,
+            report: report as unknown as Prisma.InputJsonValue,
+            errors: report.errors as unknown as Prisma.InputJsonValue,
+            finishedAt,
+          },
+        }),
+        this.prisma.syncLog.create({
+          data: {
+            siteId: job?.siteId ?? '',
+            syncType: 'order_pull',
+            status,
+            details: { syncJobId, ...report } as unknown as Prisma.InputJsonValue,
+          },
+        }),
+        // Advance the incremental cursor only when we observed a newer modified date.
+        ...(newestModified
+          ? [
+              this.prisma.siteConfig.update({
+                where: { id: job?.siteId ?? '' },
+                data: { lastOrderPullAt: newestModified },
+              }),
+            ]
+          : []),
+      ])
+      .catch(async (err) => {
+        this.logger.warn(`Finalize transaction failed: ${(err as Error).message}`);
+        await this.prisma.syncJob
+          .update({
+            where: { id: syncJobId },
+            data: {
+              status: 'COMPLETED',
+              totalItems: report.pulled + report.failed,
+              pushedCount: report.pulled,
+              failedCount: report.failed,
+              report: report as unknown as Prisma.InputJsonValue,
+              finishedAt,
+            },
+          })
+          .catch(() => undefined);
+      });
   }
 
   private async markFailed(
@@ -456,7 +480,11 @@ export class OrderPullService {
             siteId: job?.siteId ?? '',
             syncType: 'order_pull',
             status: 'failed',
-            details: { syncJobId, fatal: cause.message, ...report } as unknown as Prisma.InputJsonValue,
+            details: {
+              syncJobId,
+              fatal: cause.message,
+              ...report,
+            } as unknown as Prisma.InputJsonValue,
           },
         }),
       ]);

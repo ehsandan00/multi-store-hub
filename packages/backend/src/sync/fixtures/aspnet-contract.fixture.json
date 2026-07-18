@@ -1,0 +1,47 @@
+{
+  "discoverySource": "isolated MooyeKamandShopDb backup export",
+  "lookupRequest": {
+    "sourceProductIds": [3611],
+    "sourceCombinationIds": [6711],
+    "skus": ["3611"]
+  },
+  "lookupResponse": {
+    "items": [
+      {
+        "id": 3611,
+        "sku": "3611",
+        "name": "Exported product fixture",
+        "price": "960000.0000",
+        "stockQuantity": 0,
+        "kind": "PRODUCT",
+        "parentProductId": null
+      },
+      {
+        "id": 6711,
+        "sku": null,
+        "name": "Exported combination fixture",
+        "price": "3300000.0000",
+        "stockQuantity": 100,
+        "kind": "COMBINATION",
+        "parentProductId": 3690
+      }
+    ],
+    "unresolvedSourceProductIds": [],
+    "unresolvedSourceCombinationIds": [],
+    "unresolvedSkus": [],
+    "duplicateSkus": []
+  },
+  "updates": [
+    {
+      "sourceProductId": 3611,
+      "sku": "3611",
+      "price": "970000",
+      "stockQuantity": 4
+    },
+    {
+      "sourceCombinationId": 6711,
+      "price": "3400000",
+      "stockQuantity": 95
+    }
+  ]
+}

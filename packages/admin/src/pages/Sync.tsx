@@ -51,6 +51,46 @@ export function SyncPage() {
     onError: (err) => toast.error(t('sync.queueSyncFailed'), toApiError(err).message),
   });
 
+  const previewAspNetMut = useMutation({
+    mutationFn: (site: SafeSite) => syncApi.previewAspNet(site.id, { scope: 'PRICE_STOCK' }),
+    onSuccess: (report, site) => {
+      toast.success(
+        t('sync.aspNetPreviewReady'),
+        t('sync.aspNetPreviewSummary', {
+          matched: report.matched,
+          unresolved: report.unresolved,
+          duplicate: report.duplicate,
+        }),
+      );
+      setPushScope('PRICE_STOCK');
+      setPushTarget(site);
+    },
+    onError: (err) => toast.error(t('sync.aspNetPreviewFailed'), toApiError(err).message),
+  });
+
+  const importMappingsMut = useMutation({
+    mutationFn: async ({ siteId, file }: { siteId: string; file: File }) => {
+      const text = await file.text();
+      const rows = text
+        .split(/\r?\n/)
+        .map((line) => line.split('\t'))
+        .filter((columns) => columns.length >= 2)
+        .map(([sourceProductId, sku]) => ({
+          sourceProductId: Number(sourceProductId.trim()),
+          sourceKind: 'PRODUCT' as const,
+          sku: sku.trim(),
+        }))
+        .filter(
+          (row) => Number.isInteger(row.sourceProductId) && row.sourceProductId > 0 && row.sku,
+        );
+      return syncApi.importAspNetMappings(siteId, rows);
+    },
+    onSuccess: (result) => {
+      toast.success(t('sync.mappingImportComplete'), t('sync.mappingImportSummary', result));
+    },
+    onError: (err) => toast.error(t('sync.mappingImportFailed'), toApiError(err).message),
+  });
+
   const pullMut = useMutation({
     mutationFn: (siteId: string) => syncApi.pull(siteId),
     onSuccess: (res: { id: string; status: SyncJobStatus; queued: boolean }) => {
@@ -131,9 +171,11 @@ export function SyncPage() {
               canSchedule={canSchedule}
               lastJob={latestJobForSite(jobsQ.data?.data ?? [], s.id)}
               onPush={() => {
-                setPushScope('ALL');
+                setPushScope(s.platform === 'NOPCOMMERCE_ASPNET' ? 'PRICE_STOCK' : 'ALL');
                 setPushTarget(s);
               }}
+              onPreview={() => previewAspNetMut.mutate(s)}
+              onImportMappings={(file) => importMappingsMut.mutate({ siteId: s.id, file })}
               onPull={() => setPullTarget(s)}
               onToggleSchedule={(enabled) =>
                 scheduleMut.mutate({ siteId: s.id, payload: { syncEnabled: enabled } })
@@ -145,6 +187,8 @@ export function SyncPage() {
                 scheduleMut.mutate({ siteId: s.id, payload: { syncIntervalMs: ms } })
               }
               scheduleLoading={scheduleMut.isPending}
+              previewLoading={previewAspNetMut.isPending}
+              mappingImportLoading={importMappingsMut.isPending}
             />
           ))}
           {sitesQ.data && sitesQ.data.data.length === 0 && (
@@ -260,7 +304,11 @@ export function SyncPage() {
       <ConfirmDialog
         open={!!pushTarget}
         title={t('sync.pushDialogTitle', { name: pushTarget?.name ?? '' })}
-        message={t('sync.pushDialogMessage')}
+        message={
+          pushTarget?.platform === 'NOPCOMMERCE_ASPNET'
+            ? t('sync.aspNetPushDialogMessage')
+            : t('sync.pushDialogMessage')
+        }
         confirmLabel={t('sync.queuePush')}
         cancelLabel={t('common.cancel')}
         loading={pushMut.isPending}
@@ -319,9 +367,7 @@ function DirectionBadge({ direction }: { direction: SyncJob['direction'] }) {
   const { t } = useTranslation();
   const isPull = direction === 'PULL';
   return (
-    <Badge tone={isPull ? 'blue' : 'gray'}>
-      {t(`syncDirection.${direction}`, direction)}
-    </Badge>
+    <Badge tone={isPull ? 'blue' : 'gray'}>{t(`syncDirection.${direction}`, direction)}</Badge>
   );
 }
 
@@ -332,10 +378,14 @@ function SiteSyncCard({
   lastJob,
   onPush,
   onPull,
+  onPreview,
+  onImportMappings,
   onToggleSchedule,
   onToggleOrderPull,
   onIntervalChange,
   scheduleLoading,
+  previewLoading,
+  mappingImportLoading,
 }: {
   site: SafeSite;
   canMutate: boolean;
@@ -343,10 +393,14 @@ function SiteSyncCard({
   lastJob?: SyncJob;
   onPush: () => void;
   onPull: () => void;
+  onPreview: () => void;
+  onImportMappings: (file: File) => void;
   onToggleSchedule: (enabled: boolean) => void;
   onToggleOrderPull: (enabled: boolean) => void;
   onIntervalChange: (ms: number) => void;
   scheduleLoading: boolean;
+  previewLoading: boolean;
+  mappingImportLoading: boolean;
 }) {
   const { t } = useTranslation();
   const intervalMin = Math.round(site.syncIntervalMs / 60_000);
@@ -358,11 +412,16 @@ function SiteSyncCard({
           <p className="truncate font-semibold text-slate-900">{site.name}</p>
           <p className="mt-0.5 truncate font-mono text-xs text-slate-500">{site.baseUrl}</p>
         </div>
-        {site.networkRoute === 'DIRECT' ? (
-          <Badge tone="green">{t('sync.direct')}</Badge>
-        ) : (
-          <Badge tone="blue">{t('sync.proxy')}</Badge>
-        )}
+        <div className="flex flex-wrap justify-end gap-1">
+          <Badge tone={site.platform === 'NOPCOMMERCE_ASPNET' ? 'amber' : 'gray'}>
+            {site.platform === 'NOPCOMMERCE_ASPNET' ? 'ASP.NET' : 'WooCommerce'}
+          </Badge>
+          {site.networkRoute === 'DIRECT' ? (
+            <Badge tone="green">{t('sync.direct')}</Badge>
+          ) : (
+            <Badge tone="blue">{t('sync.proxy')}</Badge>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
@@ -375,7 +434,9 @@ function SiteSyncCard({
           <p>{site.lastOrderPullAt ? formatDateTime(site.lastOrderPullAt) : t('common.never')}</p>
         </div>
         <div className="col-span-2">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sync.latestJob')}</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">
+            {t('sync.latestJob')}
+          </p>
           <p className="flex items-center gap-1.5">
             {lastJob ? (
               <>
@@ -396,7 +457,7 @@ function SiteSyncCard({
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                className="text-brand-600 focus:ring-brand-500 h-4 w-4 rounded border-slate-300"
                 checked={site.syncEnabled}
                 disabled={scheduleLoading}
                 onChange={(e) => onToggleSchedule(e.target.checked)}
@@ -413,35 +474,37 @@ function SiteSyncCard({
         </div>
       </div>
 
-      <div className="rounded-lg bg-slate-50 p-2.5 text-xs">
-        <div className="flex items-center justify-between">
-          <span className="font-medium text-slate-700">{t('sync.scheduledPull')}</span>
-          {canSchedule ? (
-            <label className="inline-flex cursor-pointer items-center gap-1.5">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                checked={site.orderPullEnabled}
-                disabled={scheduleLoading}
-                onChange={(e) => onToggleOrderPull(e.target.checked)}
-              />
-              <span className={site.orderPullEnabled ? 'text-emerald-700' : 'text-slate-500'}>
-                {site.orderPullEnabled ? t('common.on') : t('common.off')}
-              </span>
-            </label>
-          ) : (
-            <Badge tone={site.orderPullEnabled ? 'green' : 'gray'}>
-              {site.orderPullEnabled ? t('common.enabled') : t('common.disabled')}
-            </Badge>
-          )}
+      {site.platform !== 'NOPCOMMERCE_ASPNET' && (
+        <div className="rounded-lg bg-slate-50 p-2.5 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-slate-700">{t('sync.scheduledPull')}</span>
+            {canSchedule ? (
+              <label className="inline-flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="text-brand-600 focus:ring-brand-500 h-4 w-4 rounded border-slate-300"
+                  checked={site.orderPullEnabled}
+                  disabled={scheduleLoading}
+                  onChange={(e) => onToggleOrderPull(e.target.checked)}
+                />
+                <span className={site.orderPullEnabled ? 'text-emerald-700' : 'text-slate-500'}>
+                  {site.orderPullEnabled ? t('common.on') : t('common.off')}
+                </span>
+              </label>
+            ) : (
+              <Badge tone={site.orderPullEnabled ? 'green' : 'gray'}>
+                {site.orderPullEnabled ? t('common.enabled') : t('common.disabled')}
+              </Badge>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {canSchedule ? (
         <div className="-mt-1 flex items-center gap-2 text-xs">
           <label className="text-slate-500">{t('sync.interval')}</label>
           <select
-            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-brand-500 focus:ring-brand-500"
+            className="focus:border-brand-500 focus:ring-brand-500 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
             value={intervalMin}
             disabled={scheduleLoading}
             onChange={(e) => onIntervalChange(Number(e.target.value) * 60_000)}
@@ -458,13 +521,57 @@ function SiteSyncCard({
       )}
 
       {canMutate && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {site.platform === 'NOPCOMMERCE_ASPNET' && (
+            <label
+              className={
+                'inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 ' +
+                (mappingImportLoading ? 'pointer-events-none opacity-60' : '')
+              }
+            >
+              {mappingImportLoading ? t('common.loading') : t('sync.importAspNetMappings')}
+              <input
+                type="file"
+                accept=".tsv,text/tab-separated-values,text/plain"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onImportMappings(file);
+                  event.target.value = '';
+                }}
+              />
+            </label>
+          )}
+          {site.platform === 'NOPCOMMERCE_ASPNET' && (
+            <Button
+              onClick={onPreview}
+              type="button"
+              disabled={!site.isActive}
+              loading={previewLoading}
+              variant="secondary"
+              className="flex-1"
+            >
+              {t('sync.previewPriceStock')}
+            </Button>
+          )}
           <Button onClick={onPush} type="button" disabled={!site.isActive} className="flex-1">
-            {!site.isActive ? t('sync.siteInactive') : t('sync.pushProducts')}
+            {!site.isActive
+              ? t('sync.siteInactive')
+              : site.platform === 'NOPCOMMERCE_ASPNET'
+                ? t('sync.pushPriceStock')
+                : t('sync.pushProducts')}
           </Button>
-          <Button onClick={onPull} type="button" disabled={!site.isActive} variant="secondary" className="flex-1">
-            {t('sync.pullOrders')}
-          </Button>
+          {site.platform !== 'NOPCOMMERCE_ASPNET' && (
+            <Button
+              onClick={onPull}
+              type="button"
+              disabled={!site.isActive}
+              variant="secondary"
+              className="flex-1"
+            >
+              {t('sync.pullOrders')}
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -475,7 +582,7 @@ function JobMobileCard({ job }: { job: SyncJob }) {
   const { t } = useTranslation();
   const isPull = job.direction === 'PULL';
   const r = job.report as Record<string, number | undefined> | null;
-  const processed = isPull ? r?.pulled ?? job.pushedCount : r?.pushed ?? job.pushedCount;
+  const processed = isPull ? (r?.pulled ?? job.pushedCount) : (r?.pushed ?? job.pushedCount);
   const failed = r?.failed ?? job.failedCount;
 
   return (
@@ -507,8 +614,8 @@ function JobRow({ job }: { job: SyncJob }) {
   const errors = job.errors ?? (report as any)?.errors ?? [];
   const isPull = job.direction === 'PULL';
   const processed = isPull
-    ? (report as any)?.pulled ?? job.pushedCount
-    : report?.pushed ?? job.pushedCount;
+    ? ((report as any)?.pulled ?? job.pushedCount)
+    : (report?.pushed ?? job.pushedCount);
   const created = isPull ? (report as any)?.created : report?.created;
   const updated = isPull ? (report as any)?.updated : report?.updated;
   const errorList = Array.isArray(errors) ? errors : [];
@@ -545,17 +652,25 @@ function JobRow({ job }: { job: SyncJob }) {
         <tr className="bg-rose-50/40">
           <td colSpan={9} className="px-4 py-2">
             <ul className="space-y-1 text-xs text-rose-800">
-              {errorList.slice(0, 25).map((e: Record<string, string | undefined>, i: number) => (
-                <li key={i}>
-                  <span className="font-mono">
-                    {e.sku ?? e.orderNumber ?? e.remoteOrderId}
-                  </span>{' '}
-                  — {e.message}
-                  {e.code ? (
-                    <span className="ms-1 text-rose-500">({e.code})</span>
-                  ) : null}
-                </li>
-              ))}
+              {errorList
+                .slice(0, 25)
+                .map((e: Record<string, string | number | undefined>, i: number) => (
+                  <li key={i}>
+                    <span className="font-mono">{e.sku ?? e.orderNumber ?? e.remoteOrderId}</span>{' '}
+                    {e.sourceProductId ? (
+                      <span className="font-mono text-slate-500">
+                        [Product:{e.sourceProductId}]{' '}
+                      </span>
+                    ) : null}
+                    {e.sourceCombinationId ? (
+                      <span className="font-mono text-slate-500">
+                        [Combination:{e.sourceCombinationId}]{' '}
+                      </span>
+                    ) : null}
+                    — {e.message}
+                    {e.code ? <span className="ms-1 text-rose-500">({e.code})</span> : null}
+                  </li>
+                ))}
               {errorList.length > 25 && (
                 <li className="text-slate-500">
                   {t('sync.moreErrors', { count: errorList.length - 25 })}
@@ -608,10 +723,7 @@ function LogRow({
   );
 }
 
-const SYNC_JOB_STATUS_TONE: Record<
-  SyncJobStatus,
-  'gray' | 'blue' | 'amber' | 'green' | 'red'
-> = {
+const SYNC_JOB_STATUS_TONE: Record<SyncJobStatus, 'gray' | 'blue' | 'amber' | 'green' | 'red'> = {
   QUEUED: 'gray',
   PROCESSING: 'blue',
   COMPLETED: 'green',

@@ -7,6 +7,7 @@ import { SyncController } from './sync.controller';
 import { SyncProcessor } from './sync.processor';
 import { SyncScheduler } from './sync.scheduler';
 import { WooCommerceClient } from './woocommerce-client';
+import { AspNetProductClient } from './aspnet-product.client';
 import { HttpProxyModule } from '../http-proxy/http-proxy.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { SYNC_QUEUE_NAME } from './sync.types';
@@ -41,7 +42,14 @@ import { SYNC_QUEUE_NAME } from './sync.types';
     }),
   ],
   controllers: [SyncController],
-  providers: [SyncService, OrderPullService, WooCommerceClient, SyncProcessor, SyncScheduler],
-  exports: [SyncService, OrderPullService, WooCommerceClient],
+  providers: [
+    SyncService,
+    OrderPullService,
+    WooCommerceClient,
+    AspNetProductClient,
+    SyncProcessor,
+    SyncScheduler,
+  ],
+  exports: [SyncService, OrderPullService, WooCommerceClient, AspNetProductClient],
 })
 export class SyncModule {}

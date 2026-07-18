@@ -13,6 +13,7 @@ const site: SafeSite = {
   id: 's1',
   name: 'Demo IR store',
   baseUrl: 'https://demo.example.ir',
+  platform: 'WOOCOMMERCE',
   consumerKeyMasked: '••••key1',
   consumerSecretMasked: '••••sec1',
   networkRoute: 'DIRECT',
@@ -109,9 +110,7 @@ describe('Sync page', () => {
 
   it('renders per-site cards, the jobs table, and the sync log', async () => {
     renderPage();
-    await waitFor(() =>
-      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0));
     // Schedule sections (push + pull)
     expect(screen.getByText(/ارسال زمان‌بندی‌شده محصول/)).toBeInTheDocument();
     expect(screen.getByText(/دریافت زمان‌بندی‌شده سفارش/)).toBeInTheDocument();
@@ -128,9 +127,7 @@ describe('Sync page', () => {
       refreshToken: 'rtok',
     });
     renderPage();
-    await waitFor(() =>
-      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0));
     expect(screen.queryByRole('button', { name: /ارسال محصولات/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /دریافت سفارش‌ها/i })).not.toBeInTheDocument();
     expect(screen.getAllByText(/غیرفعال/).length).toBeGreaterThanOrEqual(1);
@@ -143,9 +140,7 @@ describe('Sync page', () => {
       .mockResolvedValue({ id: 'sj-new', status: 'QUEUED', queued: true });
 
     renderPage();
-    await waitFor(() =>
-      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0));
     await user.click(screen.getByRole('button', { name: /ارسال محصولات/i }));
     await waitFor(() => expect(screen.getByText(/افزودن به صف/i)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /افزودن به صف/i }));
@@ -173,13 +168,41 @@ describe('Sync page', () => {
       .mockResolvedValue({ id: 'sj-pull', status: 'QUEUED', queued: true });
 
     renderPage();
-    await waitFor(() =>
-      expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
-    );
+    await waitFor(() => expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0));
     await user.click(screen.getByRole('button', { name: /دریافت سفارش‌ها/i }));
     await waitFor(() => expect(screen.getByText(/افزودن به صف/i)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /افزودن به صف/i }));
     await waitFor(() => expect(pullSpy).toHaveBeenCalledWith('s1'));
+  });
+
+  it('previews and queues price/stock only for an ASP.NET site', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(apiModule.sitesApi, 'list').mockResolvedValue({
+      data: [{ ...site, id: 'asp1', name: 'ASP Store', platform: 'NOPCOMMERCE_ASPNET' }],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
+    const previewSpy = vi.spyOn(apiModule.syncApi, 'previewAspNet').mockResolvedValue({
+      siteId: 'asp1',
+      total: 3,
+      matched: 2,
+      unresolved: 1,
+      duplicate: 0,
+      items: [],
+    });
+    const pushSpy = vi
+      .spyOn(apiModule.syncApi, 'push')
+      .mockResolvedValue({ id: 'asp-job', status: 'QUEUED', queued: true });
+
+    renderPage();
+    await screen.findByText('ASP Store');
+    expect(screen.queryByRole('button', { name: /دریافت سفارش‌ها/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /پیش‌نمایش قیمت و موجودی/i }));
+    await waitFor(() => expect(previewSpy).toHaveBeenCalledWith('asp1', { scope: 'PRICE_STOCK' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /افزودن به صف/i }));
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('asp1', { scope: 'PRICE_STOCK' }));
   });
 
   it('shows delete controls for admins and clears failed logs', async () => {

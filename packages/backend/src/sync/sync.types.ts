@@ -23,7 +23,7 @@ export const SYNC_DEFAULT_MIN_INTERVAL_MS = 1000; // ~1 req/s
 export const WC_LOOKUP_PAGE_SIZE = 100;
 
 /** Sync job scope options (stored on SyncJob.scope). */
-export type SyncScope = 'ALL' | 'MAPPING' | 'PRODUCT_IDS';
+export type SyncScope = 'ALL' | 'MAPPING' | 'PRODUCT_IDS' | 'PRICE_STOCK';
 
 /** WooCommerce REST API v3 path prefix. */
 export const WC_API_PREFIX = '/wp-json/wc/v3';
@@ -60,6 +60,8 @@ export interface WcProductRemote {
 
 export interface SyncItemError {
   sku: string;
+  sourceProductId?: number;
+  sourceCombinationId?: number;
   message: string;
   code?: string;
   statusCode?: number;

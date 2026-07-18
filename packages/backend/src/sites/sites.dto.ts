@@ -10,7 +10,7 @@ import {
   IsUrl,
   Min,
 } from 'class-validator';
-import { NetworkRoute } from '@prisma/client';
+import { NetworkRoute, SitePlatform } from '@prisma/client';
 
 export class CreateSiteDto {
   @ApiProperty({ example: 'IR-hosted store' })
@@ -23,6 +23,11 @@ export class CreateSiteDto {
   @IsString()
   @IsNotEmpty()
   baseUrl!: string;
+
+  @ApiPropertyOptional({ enum: SitePlatform, default: SitePlatform.WOOCOMMERCE })
+  @IsEnum(SitePlatform)
+  @IsOptional()
+  platform?: SitePlatform;
 
   @ApiProperty({ example: 'ck_consumer_key' })
   @IsString()
@@ -56,6 +61,11 @@ export class UpdateSiteDto {
   @IsOptional()
   baseUrl?: string;
 
+  @ApiPropertyOptional({ enum: SitePlatform })
+  @IsEnum(SitePlatform)
+  @IsOptional()
+  platform?: SitePlatform;
+
   @ApiPropertyOptional({ description: 'Omit to keep existing value' })
   @IsString()
   @IsOptional()
@@ -76,7 +86,9 @@ export class UpdateSiteDto {
   @IsOptional()
   isActive?: boolean;
 
-  @ApiPropertyOptional({ description: 'Phase 3: enable scheduled sync (admin also via /sync/sites/:id/schedule).' })
+  @ApiPropertyOptional({
+    description: 'Phase 3: enable scheduled sync (admin also via /sync/sites/:id/schedule).',
+  })
   @IsBoolean()
   @IsOptional()
   syncEnabled?: boolean;
@@ -113,6 +125,7 @@ export interface SafeSite {
   id: string;
   name: string;
   baseUrl: string;
+  platform: SitePlatform;
   consumerKeyMasked: string;
   consumerSecretMasked: string;
   networkRoute: NetworkRoute;
