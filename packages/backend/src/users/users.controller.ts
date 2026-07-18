@@ -9,6 +9,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -74,10 +75,8 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Audit('USER_DELETE')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a user (admin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.users.remove(id);
+  @ApiOperation({ summary: 'User deletion is disabled' })
+  remove(): never {
+    throw new ForbiddenException('User deletion is disabled');
   }
 }

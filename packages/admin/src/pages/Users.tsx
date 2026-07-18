@@ -1,15 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { usersApi, toApiError } from '../lib/api';
+import { auditLogApi, usersApi, toApiError } from '../lib/api';
 import { useToast } from '../lib/toast';
-import { useAuthStore } from '../lib/auth-store';
 import { Button } from '../components/ui/Button';
 import { Input, Select } from '../components/ui/Field';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { Spinner } from '../components/ui/Spinner';
-import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatDateTime } from '../lib/utils';
 import type { CreateUserPayload, Role, SafeUser, UpdateUserPayload } from '../lib/types';
 
@@ -19,27 +17,22 @@ const ROLE_TONE: Record<Role, 'blue' | 'amber' | 'gray'> = {
   VIEWER: 'gray',
 };
 
+const LOG_ACTION_TONE: Record<string, 'green' | 'amber' | 'red' | 'blue' | 'gray'> = {
+  USER_CREATE: 'green',
+  USER_UPDATE: 'blue',
+  USER_PASSWORD_CHANGE: 'amber',
+};
+
 export function UsersPage() {
   const { t } = useTranslation();
   const toast = useToast();
   const qc = useQueryClient();
-  const { user: currentUser } = useAuthStore();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SafeUser | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<SafeUser | null>(null);
+  const [logTarget, setLogTarget] = useState<SafeUser | null>(null);
 
   const listQ = useQuery({ queryKey: ['users'], queryFn: () => usersApi.list() });
-
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => usersApi.remove(id),
-    onSuccess: () => {
-      toast.success(t('users.deletedSuccess'));
-      setDeleteTarget(null);
-      qc.invalidateQueries({ queryKey: ['users'] });
-    },
-    onError: (err) => toast.error(t('users.deleteFailed'), toApiError(err).message),
-  });
 
   return (
     <div className="space-y-4">
@@ -88,15 +81,8 @@ export function UsersPage() {
               >
                 {t('common.edit')}
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-rose-600 hover:bg-rose-50"
-                disabled={u.id === currentUser?.id}
-                onClick={() => setDeleteTarget(u)}
-                type="button"
-              >
-                {t('common.delete')}
+              <Button variant="ghost" size="sm" onClick={() => setLogTarget(u)} type="button">
+                {t('users.viewLog')}
               </Button>
             </div>
           </div>
@@ -151,16 +137,8 @@ export function UsersPage() {
                     >
                       {t('common.edit')}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-rose-600 hover:bg-rose-50"
-                      disabled={u.id === currentUser?.id}
-                      onClick={() => setDeleteTarget(u)}
-                      type="button"
-                      title={u.id === currentUser?.id ? t('users.cannotDeleteSelf') : undefined}
-                    >
-                      {t('common.delete')}
+                    <Button variant="ghost" size="sm" onClick={() => setLogTarget(u)} type="button">
+                      {t('users.viewLog')}
                     </Button>
                   </div>
                 </td>
@@ -174,19 +152,9 @@ export function UsersPage() {
         <UserFormModal open={formOpen} onClose={() => setFormOpen(false)} initial={editing} />
       )}
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        title={t('users.deleteTitle')}
-        message={t('users.deleteAudited', {
-          fullName: deleteTarget?.fullName,
-          email: deleteTarget?.email,
-        })}
-        confirmLabel={t('common.delete')}
-        destructive
-        loading={deleteMut.isPending}
-        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
-        onCancel={() => setDeleteTarget(null)}
-      />
+      {logTarget && (
+        <UserLogModal user={logTarget} open={!!logTarget} onClose={() => setLogTarget(null)} />
+      )}
     </div>
   );
 }
@@ -394,6 +362,109 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
           hint={t('users.passwordHint')}
         />
       </Modal>
+    </Modal>
+  );
+}
+
+function UserLogModal({
+  user,
+  open,
+  onClose,
+}: {
+  user: SafeUser;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [page, setPage] = useState(1);
+  const pageSize = 30;
+
+  const logQ = useQuery({
+    queryKey: ['audit-log', 'user', user.id, page],
+    queryFn: () => auditLogApi.list({ userId: user.id, page, pageSize }),
+    enabled: open,
+  });
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('users.logTitle', { fullName: user.fullName })}
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose} type="button">
+          {t('common.close')}
+        </Button>
+      }
+    >
+      <p className="mb-4 text-sm text-slate-500">{user.email}</p>
+      <div className="table-wrap max-h-[420px] overflow-y-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>{t('activityLog.when')}</th>
+              <th>{t('activityLog.action')}</th>
+              <th>{t('activityLog.target')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logQ.isLoading && (
+              <tr>
+                <td colSpan={3} className="py-8 text-center">
+                  <Spinner className="mx-auto h-5 w-5" />
+                </td>
+              </tr>
+            )}
+            {logQ.data?.data.map((row) => (
+              <tr key={row.id}>
+                <td className="whitespace-nowrap text-xs text-slate-600">
+                  {formatDateTime(row.createdAt)}
+                </td>
+                <td>
+                  <Badge tone={LOG_ACTION_TONE[row.action] ?? 'gray'}>
+                    {t(`activityLog.actions.${row.action}`, { defaultValue: row.action })}
+                  </Badge>
+                </td>
+                <td className="font-mono text-xs text-slate-600">
+                  {row.target ?? t('common.emDash')}
+                </td>
+              </tr>
+            ))}
+            {logQ.data?.data.length === 0 && !logQ.isLoading && (
+              <tr>
+                <td colSpan={3} className="py-8 text-center text-slate-400">
+                  {t('users.logEmpty')}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {logQ.data && logQ.data.totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-500">
+          <p>{t('common.pageOf', { page, totalPages: logQ.data.totalPages })}</p>
+          <div className="flex gap-1">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+              type="button"
+            >
+              {t('common.prev')}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= logQ.data.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              type="button"
+            >
+              {t('common.next')}
+            </Button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
