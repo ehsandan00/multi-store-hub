@@ -25,8 +25,6 @@ const LOG_ACTION_TONE: Record<string, 'green' | 'amber' | 'red' | 'blue' | 'gray
 
 export function UsersPage() {
   const { t } = useTranslation();
-  const toast = useToast();
-  const qc = useQueryClient();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SafeUser | null>(null);
