@@ -1,6 +1,7 @@
 // Mirrors @prisma/client enums on the backend.
 export type Role = 'ADMIN' | 'WAREHOUSE_STAFF' | 'VIEWER';
 export type NetworkRoute = 'DIRECT' | 'VIA_FOREIGN_PROXY';
+export type ProductType = 'SIMPLE' | 'VARIABLE' | 'VARIATION';
 
 export interface AuthenticatedUser {
   id: string;
@@ -25,6 +26,17 @@ export interface SafeUser {
   updatedAt: string;
 }
 
+export interface ProductExpiryBatchRow {
+  id: string;
+  expiryDate: string;
+  quantity: number;
+}
+
+export type ProductExpiryBatchInput = {
+  expiryDate: string;
+  quantity?: number;
+};
+
 export interface ProductRow {
   id: string;
   skuMaster: string;
@@ -33,10 +45,25 @@ export interface ProductRow {
   category: string | null;
   basePrice: string; // decimal serialized as string
   expiryDate: string | null;
-  totalStock: number;
+  expiryBatches: ProductExpiryBatchRow[];
+  totalStock: number | null;
   lowStockThreshold: number;
   imageUrl: string | null;
+  hasHubPhoto: boolean;
   barcode: string | null;
+  productType: ProductType;
+  parentId: string | null;
+  parentSku: string | null;
+  parentName: string | null;
+  variationAttributes: Record<string, string> | null;
+  catalogKind?: 'HUB' | 'SITE';
+  siteId?: string | null;
+  siteName?: string | null;
+  siteSku?: string | null;
+  siteTitle?: string | null;
+  siteProductId?: string | null;
+  linkStatus?: string | null;
+  rowKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -53,6 +80,9 @@ export interface ListProductsQuery {
   search?: string;
   category?: string;
   lowStock?: boolean;
+  productType?: ProductType;
+  view?: 'hub' | 'site' | 'all';
+  siteId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -64,10 +94,14 @@ export interface CreateProductPayload {
   category?: string;
   basePrice: number;
   expiryDate?: string | null;
+  expiryBatches?: ProductExpiryBatchInput[];
   totalStock?: number;
   lowStockThreshold?: number;
   imageUrl?: string;
   barcode?: string;
+  productType?: ProductType;
+  parentId?: string | null;
+  variationAttributes?: Record<string, string> | null;
 }
 
 export type UpdateProductPayload = Partial<Omit<CreateProductPayload, 'skuMaster'>> & {
@@ -187,6 +221,7 @@ export interface ImportPreview {
   newCount: number;
   updateCount: number;
   errorCount: number;
+  mappingRowCount?: number;
   errors: ImportError[];
   rowsPreview: ValidatedImportRow[];
 }
@@ -382,6 +417,68 @@ export interface ListOrdersQuery {
   pageSize?: number;
 }
 
+// ─── Manual logistics orders ───────────────────────────────────────────────
+
+export type LogisticsOrderStatus = 'SENT' | 'NEED_PRODUCT' | 'CANCELED';
+
+export interface LogisticsEmployee {
+  id: string;
+  fullName: string;
+  email: string;
+  role: Role;
+}
+
+export interface LogisticsOrderItemRow {
+  id: string;
+  logisticsOrderId: string;
+  productId: string;
+  quantity: number;
+  productName: string;
+  skuMaster: string;
+  product?: Pick<ProductRow, 'id' | 'name' | 'skuMaster' | 'barcode'>;
+}
+
+export interface LogisticsOrderRow {
+  id: string;
+  orderNumber: string;
+  receiverName: string;
+  phone: string;
+  city: string;
+  status: LogisticsOrderStatus;
+  createdByUserId: string | null;
+  employeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  itemCount: number;
+  items: LogisticsOrderItemRow[];
+  createdBy?: { id: string; fullName: string; email: string } | null;
+  employee?: { id: string; fullName: string; email: string; role: Role } | null;
+}
+
+export interface PaginatedLogisticsOrders {
+  data: LogisticsOrderRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface ListLogisticsOrdersQuery {
+  status?: LogisticsOrderStatus;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CreateLogisticsOrderPayload {
+  employeeId: string;
+  receiverName: string;
+  phone: string;
+  city: string;
+  status: LogisticsOrderStatus;
+  items: Array<{ productId: string; quantity: number }>;
+}
+
 // ─── Dashboard (Phase 4: backend-aggregated summary) ────────────────────────
 
 export interface DashboardKpis {
@@ -391,6 +488,23 @@ export interface DashboardKpis {
   activeSites: number;
   totalOrders: number;
   ordersLast30d: number;
+  inventoryUnits: number;
+  inventoryValue: string;
+  ordersToday: number;
+  revenueToday: string;
+  expiringSoonCount: number;
+  pendingMappingReviews: number;
+  failedSyncCount: number;
+  duplicateOnSiteCount: number;
+  activeAlerts: number;
+}
+
+export interface DashboardAlertBreakdown {
+  lowStock: number;
+  expiringSoon: number;
+  failedSyncs: number;
+  pendingMappingReviews: number;
+  duplicateOnSite: number;
 }
 
 export interface RevenueSeriesPoint {
@@ -431,12 +545,32 @@ export interface RecentOrderPoint {
   dateCreated: string;
 }
 
+export interface ExpiringProductPoint {
+  id: string;
+  skuMaster: string;
+  name: string;
+  totalStock: number;
+  expiryDate: string | null;
+}
+
+export interface LatestSyncPoint {
+  siteId: string;
+  siteName: string;
+  syncType: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface DashboardSummary {
   kpis: DashboardKpis;
+  alertBreakdown: DashboardAlertBreakdown;
   revenueSeries: RevenueSeriesPoint[];
   statusBreakdown: StatusBreakdownPoint[];
+  logisticsStatusCounts: Record<LogisticsOrderStatus, number>;
   topProducts: TopProductPoint[];
   lowStockProducts: LowStockProduct[];
+  expiringSoonProducts: ExpiringProductPoint[];
+  latestSyncs: LatestSyncPoint[];
   recentOrders: RecentOrderPoint[];
   since: string;
 }
@@ -492,4 +626,245 @@ export interface MatchingPreview {
     matchAiReasoning?: string;
     mappingId?: string;
   }[];
+}
+
+export interface HubNotOnSiteRow {
+  productId: string;
+  skuMaster: string;
+  name: string;
+  siteId: string;
+  siteName: string;
+  reason: 'NO_MAPPING' | 'NOT_SYNCED' | 'PENDING_REVIEW';
+}
+
+export interface SiteNotInHubRow {
+  siteId: string;
+  siteName: string;
+  siteSku: string | null;
+  siteTitle: string;
+  siteProductId: string | null;
+  source: 'ORDER' | 'UPLOAD';
+  orderCount?: number;
+}
+
+export interface MatchingGapsResult {
+  hubNotOnSite: PaginatedReport<HubNotOnSiteRow>;
+  siteNotInHub: PaginatedReport<SiteNotInHubRow>;
+  summary: { hubNotOnSiteTotal: number; siteNotInHubTotal: number };
+}
+
+export type CompareLinkStatus =
+  | 'LINKED'
+  | 'NO_MAPPING'
+  | 'PENDING'
+  | 'NOT_SYNCED'
+  | 'SITE_ONLY';
+
+export interface ProductCompareRow {
+  kind: 'HUB' | 'SITE_ONLY';
+  linkStatus: CompareLinkStatus;
+  productId?: string;
+  hubSku?: string;
+  hubName?: string;
+  hubPrice?: string;
+  hubStock?: number;
+  productType?: string;
+  parentSku?: string | null;
+  siteSku?: string | null;
+  siteTitle?: string | null;
+  siteProductId?: string | null;
+  matchStatus?: string | null;
+  lastSyncedAt?: string | null;
+  source?: string;
+}
+
+export interface ProductCompareResult {
+  site: { id: string; name: string };
+  data: ProductCompareRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: {
+    hubTotal: number;
+    linked: number;
+    hubOnly: number;
+    siteOnly: number;
+  };
+}
+
+export interface DuplicateWarnings {
+  siteSkuDuplicates: {
+    siteId: string;
+    siteName: string;
+    siteSku: string;
+    count: number;
+    productIds: string[];
+  }[];
+  siteProductIdDuplicates: {
+    siteId: string;
+    siteName: string;
+    siteProductId: string;
+    count: number;
+    productIds: string[];
+  }[];
+  hubBarcodeDuplicates: { barcode: string; count: number; skus: string[] }[];
+  total: number;
+}
+
+export interface AuditLogRow {
+  id: string;
+  userId: string | null;
+  userEmail: string | null;
+  userFullName: string | null;
+  action: string;
+  target: string | null;
+  details: unknown;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export interface PaginatedAuditLogs {
+  data: AuditLogRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+// ─── Reports (Phase 6) ───────────────────────────────────────────────────────
+
+export interface PaginatedReport<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface InventoryReportRow {
+  id: string;
+  skuMaster: string;
+  name: string;
+  category: string | null;
+  basePrice: string;
+  totalStock: number;
+  lowStockThreshold: number;
+  expiryDate: string | null;
+  isLowStock: boolean;
+}
+
+export interface InventoryReportQuery {
+  category?: string;
+  siteId?: string;
+  lowStockOnly?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ExpiryReportRow {
+  id: string;
+  skuMaster: string;
+  name: string;
+  category: string | null;
+  totalStock: number;
+  expiryDate: string | null;
+  daysUntilExpiry: number | null;
+}
+
+export interface ExpiryReportQuery {
+  days?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export type SalesGroupBy = 'site' | 'product' | 'day';
+
+export interface SalesReportQuery {
+  siteId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  productId?: string;
+  groupBy?: SalesGroupBy;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SalesSiteRow {
+  siteId: string;
+  siteName: string;
+  orderCount: number;
+  revenue: string;
+}
+
+export interface SalesProductRow {
+  productId: string;
+  skuMaster: string | null;
+  productName: string | null;
+  orderCount: number;
+  unitsSold: number;
+  revenue: string;
+}
+
+export interface SalesDayRow {
+  day: string;
+  orderCount: number;
+  revenue: string;
+}
+
+export interface SalesReportResult {
+  groupBy: SalesGroupBy;
+  data: SalesSiteRow[] | SalesProductRow[] | SalesDayRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  filters: {
+    siteId: string | null;
+    dateFrom: string | null;
+    dateTo: string | null;
+    productId: string | null;
+  };
+}
+
+export interface SyncReportRow {
+  id: string;
+  siteId: string;
+  siteName: string;
+  syncType: string;
+  status: string;
+  details: unknown;
+  createdAt: string;
+}
+
+export interface SyncReportQuery {
+  siteId?: string;
+  syncType?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CustomerReportRow {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  totalOrdersCount: number;
+  totalSpent: string;
+  createdAt: string;
+}
+
+export interface CustomersReportQuery {
+  siteId?: string;
+  search?: string;
+  sortBy?: 'name' | 'totalOrdersCount' | 'totalSpent' | 'createdAt';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
 }

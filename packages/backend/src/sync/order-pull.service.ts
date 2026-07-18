@@ -19,6 +19,14 @@ import type {
 } from './sync.types';
 import { SYNC_QUEUE_NAME, WC_ORDERS_PAGE_SIZE } from './sync.types';
 
+/** WC sometimes returns empty strings for numeric fields; Prisma.Decimal rejects those. */
+function wcDecimal(value: unknown): Prisma.Decimal {
+  if (value === null || value === undefined || value === '') {
+    return new Prisma.Decimal(0);
+  }
+  return new Prisma.Decimal(String(value));
+}
+
 /**
  * Phase 4: pulls WooCommerce orders from a site into the hub's `Order` /
  * `OrderItem` / `Customer` tables.
@@ -202,14 +210,14 @@ export class OrderPullService {
     const baseData = {
       orderNumber: remote.number ?? String(remote.id),
       status: remote.status ?? 'pending',
-      totalAmount: new Prisma.Decimal(remote.total ?? '0'),
+      totalAmount: wcDecimal(remote.total),
       remoteOrderId: remote.id,
       dateCreated,
       dateModified,
       currency: remote.currency ?? null,
       paymentMethod: remote.payment_method ?? null,
-      discountTotal: new Prisma.Decimal(remote.discount_total ?? '0'),
-      shippingTotal: new Prisma.Decimal(remote.total_shipping ?? '0'),
+      discountTotal: wcDecimal(remote.discount_total),
+      shippingTotal: wcDecimal(remote.total_shipping),
       billingName,
       billingEmail: billing?.email ?? null,
       billingPhone: billing?.phone ?? null,
@@ -344,7 +352,7 @@ export class OrderPullService {
           orderId,
           productId,
           quantity: item.quantity ?? 1,
-          unitPrice: new Prisma.Decimal(item.price ?? item.total ?? '0'),
+          unitPrice: wcDecimal(item.price ?? item.total),
           remoteLineId: String(item.id),
           siteSku: item.sku ?? null,
           lineName: item.name ?? null,

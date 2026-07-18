@@ -19,7 +19,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'Segoe UI', 'Tahoma', 'sans-serif'],
+        sans: ['Vazirmatn', 'Tahoma', 'system-ui', 'sans-serif'],
       },
     },
   },

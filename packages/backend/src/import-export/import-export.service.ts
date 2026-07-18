@@ -14,7 +14,9 @@ import type {
   ImportPreview,
   ImportReport,
   RawImportRow,
+  RawSiteMappingRow,
   ValidatedImportRow,
+  ValidatedSiteMappingRow,
 } from './import-export.types';
 import {
   IMPORT_MAX_FILE_BYTES,
@@ -59,6 +61,15 @@ const HEADER_ALIASES: Record<string, string> = {
   'image_url': 'imageUrl',
   imageurl: 'imageUrl',
   description: 'description',
+  'product type': 'productType',
+  product_type: 'productType',
+  producttype: 'productType',
+  'parent sku': 'parentSku',
+  parent_sku: 'parentSku',
+  parentsku: 'parentSku',
+  'variation attributes': 'variationAttributes',
+  variation_attributes: 'variationAttributes',
+  variationattributes: 'variationAttributes',
 };
 
 const SITE_SKU_PREFIX = 'site:';
@@ -80,7 +91,55 @@ export class ImportExportService {
    * includes rows for the filtered product set.
    */
   async exportProductsBuffer(filters: ExportFilters): Promise<Buffer> {
+    return this.buildProductsWorkbook(filters);
+  }
+
+  /** Empty template with the same sheets/columns as export — safe to fill and re-import. */
+  async exportTemplateBuffer(): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Multi-Store Hub';
+    wb.created = new Date();
+    this.addProductsSheet(wb, []);
+    this.addSiteMappingSheet(wb, [], new Map());
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
+
+  private async buildProductsWorkbook(filters: ExportFilters): Promise<Buffer> {
     const products = await this.fetchProductsForExport(filters);
+    const parentSkuById = new Map<string, string>();
+    for (const p of products) {
+      if (p.parentId) {
+        const parent = products.find((x) => x.id === p.parentId);
+        if (parent) parentSkuById.set(p.parentId, parent.skuMaster);
+      }
+    }
+    // Include parents referenced by filtered variations even if parent didn't match filters.
+    const missingParentIds = products
+      .map((p) => p.parentId)
+      .filter((id): id is string => !!id && !products.some((p) => p.id === id));
+    if (missingParentIds.length) {
+      const parents = await this.prisma.product.findMany({
+        where: { id: { in: missingParentIds } },
+      });
+      for (const p of parents) {
+        products.push(p);
+      }
+      products.sort((a, b) => a.skuMaster.localeCompare(b.skuMaster));
+      for (const p of products) {
+        if (p.parentId) {
+          const parent = products.find((x) => x.id === p.parentId);
+          if (parent) parentSkuById.set(p.parentId, parent.skuMaster);
+        }
+      }
+    }
+    for (const p of products) {
+      if (p.parentId && !parentSkuById.has(p.parentId)) {
+        const parent = products.find((x) => x.id === p.parentId);
+        if (parent) parentSkuById.set(p.parentId, parent.skuMaster);
+      }
+    }
+
     const productIds = products.map((p) => p.id);
     const mappings =
       productIds.length > 0
@@ -93,13 +152,41 @@ export class ImportExportService {
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Multi-Store Hub';
     wb.created = new Date();
+    this.addProductsSheet(wb, products, parentSkuById);
+    const skuById = new Map(products.map((p) => [p.id, p.skuMaster]));
+    this.addSiteMappingSheet(wb, mappings, skuById);
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
 
+  private addProductsSheet(
+    wb: ExcelJS.Workbook,
+    products: Array<{
+      skuMaster: string;
+      name: string;
+      category: string | null;
+      basePrice: { toString(): string };
+      totalStock: number;
+      lowStockThreshold: number;
+      expiryDate: Date | null;
+      barcode: string | null;
+      imageUrl: string | null;
+      description: string | null;
+      productType?: string;
+      parentId?: string | null;
+      variationAttributes?: unknown;
+    }>,
+    parentSkuById: Map<string, string> = new Map(),
+  ): void {
     const productsSheet = wb.addWorksheet('Products', {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
     productsSheet.columns = [
       { header: 'sku_master', key: 'skuMaster', width: 18 },
       { header: 'name', key: 'name', width: 32 },
+      { header: 'product_type', key: 'productType', width: 12 },
+      { header: 'parent_sku', key: 'parentSku', width: 18 },
+      { header: 'variation_attributes', key: 'variationAttributes', width: 28 },
       { header: 'category', key: 'category', width: 18 },
       { header: 'base_price', key: 'basePrice', width: 12 },
       { header: 'total_stock', key: 'totalStock', width: 12 },
@@ -110,9 +197,14 @@ export class ImportExportService {
       { header: 'description', key: 'description', width: 50 },
     ];
     for (const p of products) {
+      const attrs = formatVariationAttributes(p.variationAttributes);
+      const parentSku = p.parentId ? parentSkuById.get(p.parentId) ?? '' : '';
       productsSheet.addRow({
         skuMaster: p.skuMaster,
         name: p.name,
+        productType: (p.productType ?? 'SIMPLE').toString().toLowerCase(),
+        parentSku,
+        variationAttributes: attrs,
         category: p.category ?? '',
         basePrice: p.basePrice.toString(),
         totalStock: p.totalStock,
@@ -124,7 +216,20 @@ export class ImportExportService {
       });
     }
     this.styleHeaderRow(productsSheet);
+  }
 
+  private addSiteMappingSheet(
+    wb: ExcelJS.Workbook,
+    mappings: Array<{
+      productId: string;
+      siteSku: string | null;
+      siteProductId: string | null;
+      siteSpecificTitle: string | null;
+      matchStatus: string;
+      site?: { name: string } | null;
+    }>,
+    skuById: Map<string, string>,
+  ): void {
     const mappingSheet = wb.addWorksheet('SiteMapping', {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
@@ -136,8 +241,6 @@ export class ImportExportService {
       { header: 'site_specific_title', key: 'siteSpecificTitle', width: 36 },
       { header: 'match_status', key: 'matchStatus', width: 16 },
     ];
-    // Build a lookup from product id → sku_master for fast join.
-    const skuById = new Map(products.map((p) => [p.id, p.skuMaster]));
     for (const m of mappings) {
       mappingSheet.addRow({
         skuMaster: skuById.get(m.productId) ?? '',
@@ -149,9 +252,6 @@ export class ImportExportService {
       });
     }
     this.styleHeaderRow(mappingSheet);
-
-    const buf = await wb.xlsx.writeBuffer();
-    return Buffer.from(buf);
   }
 
   // ─── Export: WooCommerce-import-ready (CSV) for a single site ───────────────
@@ -197,8 +297,14 @@ export class ImportExportService {
 
     for (const p of products) {
       const m = mapByProductId.get(p.id);
+      const wcType =
+        (p as { productType?: string }).productType === 'VARIABLE'
+          ? 'variable'
+          : (p as { productType?: string }).productType === 'VARIATION'
+            ? 'variation'
+            : 'simple';
       ws.addRow([
-        'simple',
+        wcType,
         m?.siteSku || p.skuMaster,
         m?.siteSpecificTitle || p.name,
         p.basePrice.toString(),
@@ -236,6 +342,7 @@ export class ImportExportService {
     }
 
     const rawRows = await this.parseWorkbook(fileBuffer);
+    const rawMappings = await this.parseSiteMappingSheet(fileBuffer);
     if (rawRows.length === 0) {
       throw new BadRequestException('No data rows found in the uploaded file.');
     }
@@ -258,6 +365,11 @@ export class ImportExportService {
     const existingBySku = new Map(existing.map((p) => [p.skuMaster, p.id]));
 
     const { valid, errors } = this.validateRows(rawRows, existingBySku);
+    const { valid: validMappings, errors: mappingErrors } = await this.validateMappingRows(
+      rawMappings,
+      skuSet,
+    );
+    const allErrors = [...errors, ...mappingErrors];
 
     const newCount = valid.filter((v) => v.action === 'create').length;
     const updateCount = valid.filter((v) => v.action === 'update').length;
@@ -270,14 +382,15 @@ export class ImportExportService {
         totalRows: rawRows.length,
         newCount,
         updateCount,
-        errorCount: errors.length,
-        errors: errors as unknown as Prisma.InputJsonValue,
+        errorCount: allErrors.length,
+        errors: allErrors as unknown as Prisma.InputJsonValue,
         rows: valid as unknown as Prisma.InputJsonValue,
+        mappingRows: validMappings as unknown as Prisma.InputJsonValue,
         createdByUserId: user.id,
       },
     });
 
-    return this.toPreview(job, valid);
+    return this.toPreview(job, valid, validMappings.length);
   }
 
   /** Returns the persisted preview for a job (must be in PREVIEW status). */
@@ -286,6 +399,7 @@ export class ImportExportService {
     if (!job) throw new NotFoundException('Import job not found');
     const rows = (job.rows as unknown as ValidatedImportRow[] | null) ?? [];
     const errors = (job.errors as unknown as ImportError[] | null) ?? [];
+    const mappingRows = (job.mappingRows as unknown as ValidatedSiteMappingRow[] | null) ?? [];
     return {
       jobId: job.id,
       fileName: job.fileName,
@@ -294,6 +408,7 @@ export class ImportExportService {
       newCount: job.newCount,
       updateCount: job.updateCount,
       errorCount: job.errorCount,
+      mappingRowCount: mappingRows.length,
       errors,
       rowsPreview: rows.slice(0, IMPORT_PREVIEW_ROW_SAMPLE),
     };
@@ -329,6 +444,7 @@ export class ImportExportService {
     if (!job) throw new NotFoundException('Import job not found');
 
     const rows = (job.rows as unknown as ValidatedImportRow[] | null) ?? [];
+    const mappingRows = (job.mappingRows as unknown as ValidatedSiteMappingRow[] | null) ?? [];
     const startedAt = job.startedAt ?? new Date();
 
     let created = 0;
@@ -336,13 +452,13 @@ export class ImportExportService {
     let failed = 0;
     const errors: ImportError[] = [];
 
-    // Per-row application is individually try/caught so one bad row doesn't
-    // abort the import. An unexpected escape from this loop (e.g. a Prisma
-    // connection drop) is caught by the outer guard below so the job is
-    // marked FAILED with a partial report instead of being left stuck in
-    // PROCESSING forever.
+    const sortedRows = [...rows].sort((a, b) => {
+      const rank = (t?: string) => (t === 'VARIATION' ? 2 : 1);
+      return rank(a.productType) - rank(b.productType);
+    });
+
     try {
-      for (const row of rows) {
+      for (const row of sortedRows) {
         try {
           await this.applyRow(row, job.createdByUserId ?? undefined);
           if (row.action === 'create') created += 1;
@@ -357,6 +473,19 @@ export class ImportExportService {
           this.logger.warn(
             `Import row ${row.row} (sku=${row.skuMaster}) failed: ${(err as Error).message}`,
           );
+        }
+      }
+
+      for (const m of mappingRows) {
+        try {
+          await this.applyMappingRow(m);
+        } catch (err) {
+          failed += 1;
+          errors.push({
+            row: m.row,
+            sku: m.skuMaster,
+            message: (err as Error).message ?? 'Unknown error',
+          });
         }
       }
     } catch (fatal) {
@@ -400,6 +529,7 @@ export class ImportExportService {
       report: report as unknown as Prisma.InputJsonValue,
       finishedAt,
       rows: Prisma.JsonNull,
+      mappingRows: Prisma.JsonNull,
     };
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -465,7 +595,7 @@ export class ImportExportService {
     }
     await this.prisma.importJob.update({
       where: { id: jobId },
-      data: { status: 'CANCELLED', rows: Prisma.JsonNull, finishedAt: new Date() },
+      data: { status: 'CANCELLED', rows: Prisma.JsonNull, mappingRows: Prisma.JsonNull, finishedAt: new Date() },
     });
   }
 
@@ -499,12 +629,26 @@ export class ImportExportService {
    */
   async parseWorkbook(buffer: Buffer): Promise<RawImportRow[]> {
     const wb = new ExcelJS.Workbook();
-    // ExcelJS's typing expects an ArrayBuffer-backed Buffer; Node's Buffer is
-    // Uint8Array-backed. The runtime accepts both — cast to satisfy tsc.
     await wb.xlsx.load(buffer as unknown as ArrayBuffer);
-    const ws = wb.worksheets[0];
+    const ws =
+      wb.getWorksheet('Products') ??
+      wb.worksheets.find((s) => /products/i.test(s.name)) ??
+      wb.worksheets[0];
     if (!ws) throw new BadRequestException('Workbook has no sheets.');
+    return this.parseProductSheet(ws);
+  }
 
+  async parseSiteMappingSheet(buffer: Buffer): Promise<RawSiteMappingRow[]> {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+    const ws =
+      wb.getWorksheet('SiteMapping') ??
+      wb.worksheets.find((s) => /sitemapping|site.mapping/i.test(s.name));
+    if (!ws) return [];
+    return this.parseMappingSheet(ws);
+  }
+
+  private parseProductSheet(ws: ExcelJS.Worksheet): RawImportRow[] {
     const headerRow = ws.getRow(1);
     if (!headerRow || headerRow.cellCount === 0) {
       throw new BadRequestException('First row must be a header row.');
@@ -568,6 +712,9 @@ export class ImportExportService {
     const valid: ValidatedImportRow[] = [];
     const errors: ImportError[] = [];
     const seenSkus = new Set<string>();
+    const skusInFile = new Set(
+      raw.map((r) => (r.skuMaster ?? '').trim()).filter(Boolean),
+    );
 
     for (const r of raw) {
       const sku = (r.skuMaster ?? '').trim();
@@ -629,6 +776,22 @@ export class ImportExportService {
         continue;
       }
 
+      const productType = parseProductType(r.productType);
+      const parentSku = (r.parentSku ?? '').trim() || null;
+      const variationAttributes = parseVariationAttributesText(r.variationAttributes);
+      if (productType === 'VARIATION' && !parentSku) {
+        errors.push({ row: r.row, sku, message: 'parent_sku is required for variation products' });
+        continue;
+      }
+      if (parentSku && !existingBySku.has(parentSku) && !skusInFile.has(parentSku)) {
+        errors.push({
+          row: r.row,
+          sku,
+          message: `parent_sku "${parentSku}" not found in hub or this file`,
+        });
+        continue;
+      }
+
       valid.push({
         row: r.row,
         skuMaster: sku,
@@ -641,6 +804,9 @@ export class ImportExportService {
         barcode: r.barcode ? r.barcode.trim() : undefined,
         imageUrl: r.imageUrl ? r.imageUrl.trim() : undefined,
         description: r.description ? r.description.trim() : undefined,
+        productType,
+        parentSku,
+        variationAttributes,
         siteSkus: r.siteSkus && Object.keys(r.siteSkus).length ? r.siteSkus : undefined,
         action,
         productId: existingId,
@@ -650,15 +816,113 @@ export class ImportExportService {
     return { valid, errors };
   }
 
+  private parseMappingSheet(ws: ExcelJS.Worksheet): RawSiteMappingRow[] {
+    const headerRow = ws.getRow(1);
+    if (!headerRow?.cellCount) return [];
+    const colMap = new Map<number, string>();
+    headerRow.eachCell((cell, colNumber) => {
+      const raw = String(cell.value ?? '').trim().toLowerCase();
+      if (!raw) return;
+      if (raw === 'sku_master' || raw === 'sku') colMap.set(colNumber, 'skuMaster');
+      else if (raw === 'site_name' || raw === 'site name') colMap.set(colNumber, 'siteName');
+      else if (raw === 'site_sku' || raw === 'site sku') colMap.set(colNumber, 'siteSku');
+      else if (raw === 'site_product_id' || raw === 'site product id')
+        colMap.set(colNumber, 'siteProductId');
+      else if (raw === 'site_specific_title' || raw === 'site specific title')
+        colMap.set(colNumber, 'siteSpecificTitle');
+      else if (raw === 'match_status' || raw === 'match status') colMap.set(colNumber, 'matchStatus');
+    });
+    if (!colMap.size) return [];
+
+    const out: RawSiteMappingRow[] = [];
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      if (row.hasValues === false) continue;
+      const parsed: RawSiteMappingRow = { row: r };
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        const field = colMap.get(colNumber);
+        if (!field) return;
+        (parsed as any)[field] = cell.value == null ? '' : cellText(cell.value);
+      });
+      if ((parsed.skuMaster ?? '').trim() || (parsed.siteName ?? '').trim()) out.push(parsed);
+    }
+    return out;
+  }
+
+  private async validateMappingRows(
+    raw: RawSiteMappingRow[],
+    productSkusInFile: Set<string>,
+  ): Promise<{ valid: ValidatedSiteMappingRow[]; errors: ImportError[] }> {
+    const valid: ValidatedSiteMappingRow[] = [];
+    const errors: ImportError[] = [];
+    if (!raw.length) return { valid, errors };
+
+    const sites = await this.prisma.siteConfig.findMany({ select: { id: true, name: true } });
+    const siteByName = new Map(sites.map((s) => [s.name.toLowerCase(), s]));
+
+    const existingProducts = await this.prisma.product.findMany({
+      where: {
+        skuMaster: {
+          in: [...new Set(raw.map((r) => (r.skuMaster ?? '').trim()).filter(Boolean))],
+        },
+      },
+      select: { skuMaster: true },
+    });
+    const knownSkus = new Set([
+      ...existingProducts.map((p) => p.skuMaster),
+      ...productSkusInFile,
+    ]);
+
+    for (const r of raw) {
+      const sku = (r.skuMaster ?? '').trim();
+      const siteName = (r.siteName ?? '').trim();
+      if (!sku) {
+        errors.push({ row: r.row, message: 'SiteMapping: missing sku_master' });
+        continue;
+      }
+      if (!siteName) {
+        errors.push({ row: r.row, sku, message: 'SiteMapping: missing site_name' });
+        continue;
+      }
+      if (!knownSkus.has(sku)) {
+        errors.push({
+          row: r.row,
+          sku,
+          message: `SiteMapping: sku_master "${sku}" not in Products sheet or hub`,
+        });
+        continue;
+      }
+      const site = siteByName.get(siteName.toLowerCase());
+      if (!site) {
+        errors.push({ row: r.row, sku, message: `SiteMapping: unknown site "${siteName}"` });
+        continue;
+      }
+      valid.push({
+        row: r.row,
+        skuMaster: sku,
+        siteName: site.name,
+        siteSku: (r.siteSku ?? '').trim() || null,
+        siteProductId: (r.siteProductId ?? '').trim() || null,
+        siteSpecificTitle: (r.siteSpecificTitle ?? '').trim() || null,
+        matchStatus: (r.matchStatus ?? '').trim() || null,
+      });
+    }
+    return { valid, errors };
+  }
+
   // ─── Internals: applying a single row during commit ────────────────────────
 
   private async applyRow(row: ValidatedImportRow, userId?: string): Promise<void> {
+    const parentId = row.parentSku ? await this.resolveParentId(row.parentSku) : null;
+    const productType = row.productType ?? 'SIMPLE';
+    const variationAttributes = row.variationAttributes ?? undefined;
+
     if (row.action === 'create') {
       const initialStock = row.totalStock ?? 0;
-      await this.prisma.product.create({
+      const product = await this.prisma.product.create({
         data: {
           skuMaster: row.skuMaster,
-          name: row.name ?? row.skuMaster, // defensive: validated rows have name on create
+          name: row.name ?? row.skuMaster,
           description: row.description ?? null,
           category: row.category ?? null,
           basePrice: row.basePrice != null ? new Prisma.Decimal(row.basePrice) : new Prisma.Decimal(0),
@@ -667,6 +931,19 @@ export class ImportExportService {
           lowStockThreshold: row.lowStockThreshold ?? 0,
           barcode: row.barcode ?? null,
           imageUrl: row.imageUrl ?? null,
+          productType,
+          parentId,
+          variationAttributes: variationAttributes as Prisma.InputJsonValue | undefined,
+          expiryBatches: row.expiryDate
+            ? {
+                create: [
+                  {
+                    expiryDate: new Date(row.expiryDate),
+                    quantity: initialStock,
+                  },
+                ],
+              }
+            : undefined,
           inventoryLogs:
             initialStock > 0
               ? {
@@ -679,14 +956,12 @@ export class ImportExportService {
                   ],
                 }
               : undefined,
-        },
+        } as Prisma.ProductCreateInput,
       });
+      await this.applySiteSkus(row.siteSkus, product.id);
       return;
     }
 
-    // update — read + compute delta + write inside a single transaction so the
-    // stock-delta computation can't observe a half-applied concurrent write.
-    // (The create path above is already atomic via Prisma's nested writes.)
     await this.prisma.$transaction(async (tx) => {
       const existing = row.productId
         ? await tx.product.findUnique({ where: { id: row.productId } })
@@ -711,6 +986,11 @@ export class ImportExportService {
         data.expiryDate = row.expiryDate ? new Date(row.expiryDate) : null;
       }
       if (row.totalStock !== undefined) data.totalStock = nextStock;
+      if (row.productType !== undefined) (data as Prisma.ProductUpdateInput & { productType?: string }).productType = row.productType;
+      if (row.parentSku !== undefined) (data as Prisma.ProductUpdateInput & { parentId?: string | null }).parentId = parentId;
+      if (row.variationAttributes !== undefined) {
+        data.variationAttributes = variationAttributes as Prisma.InputJsonValue | undefined;
+      }
 
       if (stockDelta !== 0) {
         data.inventoryLogs = {
@@ -725,6 +1005,82 @@ export class ImportExportService {
       }
 
       await tx.product.update({ where: { id: existing.id }, data });
+
+      if (row.expiryDate !== undefined) {
+        await tx.productExpiryBatch.deleteMany({ where: { productId: existing.id } });
+        if (row.expiryDate) {
+          await tx.productExpiryBatch.create({
+            data: {
+              productId: existing.id,
+              expiryDate: new Date(row.expiryDate),
+              quantity: nextStock,
+            },
+          });
+        }
+      }
+    });
+    const updatedProduct = await this.prisma.product.findUnique({
+      where: { skuMaster: row.skuMaster },
+      select: { id: true },
+    });
+    if (updatedProduct) await this.applySiteSkus(row.siteSkus, updatedProduct.id);
+  }
+
+  private async resolveParentId(parentSku: string): Promise<string> {
+    const parent = await this.prisma.product.findUnique({
+      where: { skuMaster: parentSku },
+      select: { id: true },
+    });
+    if (!parent) throw new Error(`Parent product "${parentSku}" not found`);
+    return parent.id;
+  }
+
+  private async applySiteSkus(
+    siteSkus: Record<string, string> | undefined,
+    productId: string,
+  ): Promise<void> {
+    if (!siteSkus || !Object.keys(siteSkus).length) return;
+    const sites = await this.prisma.siteConfig.findMany({ select: { id: true, name: true } });
+    const siteByName = new Map(sites.map((s) => [s.name.toLowerCase(), s]));
+    for (const [siteName, siteSku] of Object.entries(siteSkus)) {
+      const site = siteByName.get(siteName.toLowerCase());
+      if (!site) continue;
+      await this.prisma.siteProductMapping.upsert({
+        where: { productId_siteId: { productId, siteId: site.id } },
+        create: {
+          productId,
+          siteId: site.id,
+          siteSku,
+          matchStatus: 'MANUAL',
+        },
+        update: { siteSku },
+      });
+    }
+  }
+
+  private async applyMappingRow(row: ValidatedSiteMappingRow): Promise<void> {
+    const product = await this.prisma.product.findUnique({
+      where: { skuMaster: row.skuMaster },
+      select: { id: true },
+    });
+    if (!product) throw new Error(`Product ${row.skuMaster} not found`);
+    const site = await this.prisma.siteConfig.findFirst({
+      where: { name: { equals: row.siteName, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (!site) throw new Error(`Site ${row.siteName} not found`);
+
+    const matchStatus = parseMatchStatus(row.matchStatus);
+    const data = {
+      siteSku: row.siteSku,
+      siteProductId: row.siteProductId,
+      siteSpecificTitle: row.siteSpecificTitle,
+      matchStatus,
+    };
+    await this.prisma.siteProductMapping.upsert({
+      where: { productId_siteId: { productId: product.id, siteId: site.id } },
+      create: { productId: product.id, siteId: site.id, ...data },
+      update: data,
     });
   }
 
@@ -775,6 +1131,7 @@ export class ImportExportService {
       rows: unknown;
     },
     rows: ValidatedImportRow[],
+    mappingRowCount = 0,
   ): ImportPreview {
     return {
       jobId: job.id,
@@ -784,6 +1141,7 @@ export class ImportExportService {
       newCount: job.newCount,
       updateCount: job.updateCount,
       errorCount: job.errorCount,
+      mappingRowCount,
       errors: (job.errors as unknown as ImportError[]) ?? [],
       rowsPreview: rows.slice(0, IMPORT_PREVIEW_ROW_SAMPLE),
     };
@@ -823,7 +1181,6 @@ function cellText(value: ExcelJS.CellValue): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (typeof value === 'object') {
-    // { formula, result } or rich text
     if ('result' in value && value.result != null) return String(value.result);
     if ('richText' in value && Array.isArray(value.richText)) {
       return value.richText.map((rt: any) => rt.text ?? '').join('');
@@ -831,4 +1188,41 @@ function cellText(value: ExcelJS.CellValue): string {
     if ('text' in value && value.text != null) return String(value.text);
   }
   return String(value);
+}
+
+export function parseProductType(raw?: string | null): import('@prisma/client').ProductType {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === 'variable') return 'VARIABLE';
+  if (v === 'variation') return 'VARIATION';
+  return 'SIMPLE';
+}
+
+export function parseVariationAttributesText(
+  raw?: string | null,
+): Record<string, string> | null {
+  if (!raw?.trim()) return null;
+  const out: Record<string, string> = {};
+  for (const part of raw.split(/[|;]/)) {
+    const seg = part.trim();
+    if (!seg) continue;
+    const [k, ...rest] = seg.includes('=') ? seg.split('=') : seg.split(':');
+    const key = (k ?? '').trim();
+    const val = rest.join(seg.includes('=') ? '=' : ':').trim();
+    if (key && val) out[key] = val;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+export function formatVariationAttributes(attrs: unknown): string {
+  if (!attrs || typeof attrs !== 'object') return '';
+  return Object.entries(attrs as Record<string, string>)
+    .map(([k, v]) => `${k}:${v}`)
+    .join('|');
+}
+
+function parseMatchStatus(raw?: string | null): import('@prisma/client').MatchStatus {
+  const v = (raw ?? '').trim().toUpperCase();
+  if (v === 'APPROVED') return 'APPROVED';
+  if (v === 'PENDING_REVIEW') return 'PENDING_REVIEW';
+  return 'MANUAL';
 }

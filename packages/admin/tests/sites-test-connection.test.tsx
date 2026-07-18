@@ -63,8 +63,8 @@ describe('Sites list', () => {
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
-    // The desktop table's Test button has the exact label "Test" (the mobile card uses "Test connection").
-    expect(screen.getByRole('button', { name: /^test$/i })).toBeInTheDocument();
+    // The desktop table's Test button has the exact label "تست" (the mobile card uses "تست اتصال").
+    expect(screen.getByRole('button', { name: /^تست$/ })).toBeInTheDocument();
   });
 
   it('shows a success result with latency + route after a successful test', async () => {
@@ -88,15 +88,15 @@ describe('Sites list', () => {
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
 
-    await user.click(screen.getByRole('button', { name: /^test$/i }));
+    await user.click(screen.getByRole('button', { name: /^تست$/ }));
 
     await waitFor(() => expect(testSpy).toHaveBeenCalledWith('s1'));
     // Toast + desktop row + mobile card all surface success; assert at least one shows OK + latency.
     await waitFor(() =>
-      expect(screen.getAllByText(/^OK$/i).length).toBeGreaterThan(0),
+      expect(screen.getAllByText(/^تأیید$/).length).toBeGreaterThan(0),
     );
     expect(screen.getAllByText(/187ms/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/DIRECT/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/مستقیم/).length).toBeGreaterThan(0);
   });
 
   it('shows a failure result when the test fails', async () => {
@@ -120,9 +120,9 @@ describe('Sites list', () => {
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
 
-    await user.click(screen.getByRole('button', { name: /^test$/i }));
+    await user.click(screen.getByRole('button', { name: /^تست$/ }));
 
-    await waitFor(() => expect(screen.getByText(/^fail$/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/^ناموفق$/)).toBeInTheDocument());
     expect(screen.getByText(/^TIMEOUT$/i)).toBeInTheDocument();
   });
 });

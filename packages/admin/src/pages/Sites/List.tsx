@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { sitesApi, toApiError } from '../../lib/api';
 import { useAuthStore } from '../../lib/auth-store';
@@ -11,7 +12,12 @@ import { SiteFormModal } from './Form';
 import { formatDateTime } from '../../lib/utils';
 import type { SafeSite, TestConnectionResult } from '../../lib/types';
 
+function routeLabel(route: SafeSite['networkRoute'], t: (key: string) => string) {
+  return route === 'DIRECT' ? t('sites.directIr') : t('sites.viaProxy');
+}
+
 export function SitesList() {
+  const { t } = useTranslation();
   const { user } = useAuthStore();
   const toast = useToast();
   const qc = useQueryClient();
@@ -39,18 +45,24 @@ export function SitesList() {
       setTestResult((r) => ({ ...r, [id]: res }));
       if (res.ok) {
         toast.success(
-          `Connection OK (${res.latencyMs}ms via ${res.routeUsed})`,
+          t('sites.connectionOkToast', {
+            latencyMs: res.latencyMs,
+            routeUsed: t(
+              res.routeUsed === 'DIRECT' ? 'sites.routeUsedDirect' : 'sites.routeUsedProxy',
+              res.routeUsed,
+            ),
+          }),
           `Status ${res.status}`,
         );
       } else {
         toast.error(
-          `Connection failed`,
+          t('sites.connectionFailedToast'),
           res.error ? `${res.error.code}: ${res.error.message}` : undefined,
         );
       }
     },
     onError: (err, id) => {
-      toast.error('Test connection failed', toApiError(err).message);
+      toast.error(t('sites.testFailed'), toApiError(err).message);
       setTestResult((r) => ({
         ...r,
         [id]: {
@@ -68,21 +80,21 @@ export function SitesList() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => sitesApi.remove(id),
     onSuccess: () => {
-      toast.success('Site deleted');
+      toast.success(t('sites.deletedSuccess'));
       setDeleteTarget(null);
       qc.invalidateQueries({ queryKey: ['sites'] });
     },
-    onError: (err) => toast.error('Failed to delete site', toApiError(err).message),
+    onError: (err) => toast.error(t('sites.deleteFailed'), toApiError(err).message),
   });
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Sites</h1>
+          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t('sites.title')}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            The 8 WooCommerce stores.{' '}
-            {!canMutate && 'You have read-only access.'}
+            {t('sites.subtitle')}{' '}
+            {!canMutate && t('common.readOnly')}
           </p>
         </div>
         {canMutate && (
@@ -92,12 +104,11 @@ export function SitesList() {
               setFormOpen(true);
             }}
           >
-            + Add site
+            {t('sites.addSite')}
           </Button>
         )}
       </div>
 
-      {/* Mobile cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {listQ.isLoading && (
           <div className="card flex justify-center p-6">
@@ -122,18 +133,17 @@ export function SitesList() {
         ))}
       </div>
 
-      {/* Desktop table */}
       <div className="table-wrap hidden md:block">
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Base URL</th>
-              <th>Route</th>
-              <th>Credentials</th>
-              <th>Status</th>
-              <th>Last test</th>
-              <th className="text-right">Actions</th>
+              <th>{t('sites.name')}</th>
+              <th>{t('sites.baseUrl')}</th>
+              <th>{t('sites.route')}</th>
+              <th>{t('sites.credentials')}</th>
+              <th>{t('sites.status')}</th>
+              <th>{t('sites.lastTest')}</th>
+              <th className="text-end">{t('products.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -147,7 +157,7 @@ export function SitesList() {
             {listQ.isError && (
               <tr>
                 <td colSpan={7} className="py-6 text-center text-rose-600">
-                  Failed to load sites: {toApiError(listQ.error).message}
+                  {t('sites.loadFailed', { message: toApiError(listQ.error).message })}
                 </td>
               </tr>
             )}
@@ -159,28 +169,32 @@ export function SitesList() {
                   <td className="max-w-[260px] truncate font-mono text-xs">{s.baseUrl}</td>
                   <td>
                     {s.networkRoute === 'DIRECT' ? (
-                      <Badge tone="green">Direct (IR)</Badge>
+                      <Badge tone="green">{t('sites.directIr')}</Badge>
                     ) : (
-                      <Badge tone="blue">Via foreign proxy</Badge>
+                      <Badge tone="blue">{t('sites.viaProxy')}</Badge>
                     )}
                   </td>
                   <td className="font-mono text-xs text-slate-500">
                     {s.consumerKeyMasked} / {s.consumerSecretMasked}
                   </td>
                   <td>
-                    {s.isActive ? <Badge tone="green">active</Badge> : <Badge tone="gray">inactive</Badge>}
+                    {s.isActive ? (
+                      <Badge tone="green">{t('common.active')}</Badge>
+                    ) : (
+                      <Badge tone="gray">{t('common.inactive')}</Badge>
+                    )}
                   </td>
                   <td>
                     {r ? (
                       <span className="inline-flex items-center gap-1.5 text-xs">
                         {r.ok ? (
                           <>
-                            <Badge tone="green">OK</Badge>
+                            <Badge tone="green">{t('common.ok')}</Badge>
                             <span className="text-slate-500">{r.latencyMs}ms</span>
                           </>
                         ) : (
                           <>
-                            <Badge tone="red">fail</Badge>
+                            <Badge tone="red">{t('sites.fail')}</Badge>
                             <span className="text-slate-500" title={r.error?.message}>
                               {r.error?.code}
                             </span>
@@ -188,10 +202,10 @@ export function SitesList() {
                         )}
                       </span>
                     ) : (
-                      <span className="text-xs text-slate-400">—</span>
+                      <span className="text-xs text-slate-400">{t('common.emDash')}</span>
                     )}
                   </td>
-                  <td className="text-right">
+                  <td className="text-end">
                     <div className="flex items-center justify-end gap-1">
                       {canTestConnection && (
                         <Button
@@ -201,7 +215,7 @@ export function SitesList() {
                           onClick={() => testMut.mutate(s.id)}
                           type="button"
                         >
-                          Test
+                          {t('sites.test')}
                         </Button>
                       )}
                       {canMutate && (
@@ -214,7 +228,7 @@ export function SitesList() {
                           }}
                           type="button"
                         >
-                          Edit
+                          {t('common.edit')}
                         </Button>
                       )}
                       {canMutate && (
@@ -225,7 +239,7 @@ export function SitesList() {
                           onClick={() => setDeleteTarget(s)}
                           type="button"
                         >
-                          Delete
+                          {t('common.delete')}
                         </Button>
                       )}
                     </div>
@@ -236,7 +250,7 @@ export function SitesList() {
             {listQ.data && listQ.data.data.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-slate-400">
-                  No sites configured yet. Click “Add site” to start.
+                  {t('sites.empty')}
                 </td>
               </tr>
             )}
@@ -245,19 +259,22 @@ export function SitesList() {
       </div>
 
       {formOpen && (
-        <SiteFormModal open={formOpen} onClose={() => setFormOpen(false)} initial={editing} />
+        <SiteFormModal
+          key={editing?.id ?? 'new'}
+          open={formOpen}
+          onClose={() => {
+            setFormOpen(false);
+            setEditing(null);
+          }}
+          initial={editing}
+        />
       )}
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Delete site"
-        message={
-          <>
-            Delete <strong>{deleteTarget?.name}</strong>? Its sync logs remain for diagnostics.
-            This action is audited.
-          </>
-        }
-        confirmLabel="Delete"
+        title={t('sites.deleteTitle')}
+        message={t('sites.deleteAudited', { name: deleteTarget?.name })}
+        confirmLabel={t('common.delete')}
         destructive
         loading={deleteMut.isPending}
         onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
@@ -286,6 +303,8 @@ function SiteCard({
   onDelete: () => void;
   onTest: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-2">
@@ -293,19 +312,23 @@ function SiteCard({
           <p className="truncate font-semibold text-slate-900">{site.name}</p>
           <p className="mt-0.5 truncate font-mono text-xs text-slate-500">{site.baseUrl}</p>
         </div>
-        {site.isActive ? <Badge tone="green">active</Badge> : <Badge tone="gray">inactive</Badge>}
+        {site.isActive ? (
+          <Badge tone="green">{t('common.active')}</Badge>
+        ) : (
+          <Badge tone="gray">{t('common.inactive')}</Badge>
+        )}
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Route</p>
-          <p>{site.networkRoute === 'DIRECT' ? 'Direct (IR)' : 'Via foreign proxy'}</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.route')}</p>
+          <p>{site.networkRoute === 'DIRECT' ? t('sites.directIr') : t('sites.viaProxy')}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Credentials</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.credentials')}</p>
           <p className="font-mono">{site.consumerKeyMasked}</p>
         </div>
         <div className="col-span-2">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400">Updated</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">{t('sites.updatedAt')}</p>
           <p>{formatDateTime(site.updatedAt)}</p>
         </div>
       </div>
@@ -321,11 +344,19 @@ function SiteCard({
         >
           {result.ok ? (
             <>
-              ✓ OK · {result.latencyMs}ms · {result.routeUsed}
+              {t('sites.connectionOk', {
+                latencyMs: result.latencyMs,
+                routeUsed: routeLabel(result.routeUsed as SafeSite['networkRoute'], t),
+              })}
               {result.status ? ` · HTTP ${result.status}` : ''}
             </>
           ) : (
-            <>✗ Failed · {result.error?.code}: {result.error?.message}</>
+            <>
+              {t('sites.connectionFailed', {
+                code: result.error?.code,
+                message: result.error?.message,
+              })}
+            </>
           )}
         </div>
       )}
@@ -333,12 +364,12 @@ function SiteCard({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {canTest && (
           <Button variant="secondary" size="sm" loading={testing} onClick={onTest} type="button">
-            Test connection
+            {t('sites.testConnection')}
           </Button>
         )}
         {canMutate && (
           <Button variant="secondary" size="sm" onClick={onEdit} type="button">
-            Edit
+            {t('common.edit')}
           </Button>
         )}
         {canMutate && (
@@ -349,7 +380,7 @@ function SiteCard({
             onClick={onDelete}
             type="button"
           >
-            Delete
+            {t('common.delete')}
           </Button>
         )}
       </div>

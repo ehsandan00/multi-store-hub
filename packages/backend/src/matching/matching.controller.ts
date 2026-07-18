@@ -18,6 +18,8 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nes
 import { MatchingService } from './matching.service';
 import {
   BulkApproveQuery,
+  ListMatchingGapsQuery,
+  ListCompareQuery,
   ListMatchingJobsQuery,
   ListMatchingSuggestionsQuery,
   UpdateMappingDto,
@@ -122,5 +124,43 @@ export class MatchingController {
   @Roles('ADMIN', 'WAREHOUSE_STAFF', 'VIEWER')
   getJob(@Param('id') id: string) {
     return this.matching.getJob(id);
+  }
+
+  @Get('gaps')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF', 'VIEWER')
+  @ApiOperation({
+    summary:
+      'Hub vs site coverage gaps: hub products missing from a site, and site products not linked to hub',
+  })
+  getGaps(@Query() q: ListMatchingGapsQuery) {
+    return this.matching.getCoverageGaps({
+      siteId: q.siteId,
+      page: q.page ?? 1,
+      pageSize: q.pageSize ?? 25,
+    });
+  }
+
+  @Get('duplicates')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF', 'VIEWER')
+  @ApiOperation({
+    summary: 'Duplicate SKU/product-id mappings on sites and duplicate barcodes in hub',
+  })
+  getDuplicates() {
+    return this.matching.getDuplicateWarnings();
+  }
+
+  @Get('compare')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF', 'VIEWER')
+  @ApiOperation({
+    summary: 'Side-by-side comparison of hub products vs a selected site',
+  })
+  compare(@Query() q: ListCompareQuery) {
+    if (!q.siteId) throw new BadRequestException('siteId is required');
+    return this.matching.getProductComparison({
+      siteId: q.siteId,
+      page: q.page ?? 1,
+      pageSize: q.pageSize ?? 50,
+      filter: q.filter,
+    });
   }
 }

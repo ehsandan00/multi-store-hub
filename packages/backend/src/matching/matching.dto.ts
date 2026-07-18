@@ -57,6 +57,53 @@ export class BulkApproveQuery {
   siteId?: string;
 }
 
+export class ListMatchingGapsQuery {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 25 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  pageSize?: number;
+}
+
+export class ListCompareQuery {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({ enum: ['all', 'linked', 'hub_only', 'site_only', 'pending'] })
+  @IsOptional()
+  @IsString()
+  filter?: 'all' | 'linked' | 'hub_only' | 'site_only' | 'pending';
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 50 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  pageSize?: number;
+}
+
 export class UpdateMappingDto {
   @ApiPropertyOptional()
   @IsOptional()

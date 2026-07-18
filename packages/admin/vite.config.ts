@@ -10,12 +10,15 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
     port: 5173,
     strictPort: false,
     proxy: {
+      // Admin axios baseURL is `/api`; NestJS routes have no /api prefix — strip it here.
       '/api': {
-        target: process.env.VITE_API_URL ?? 'http://localhost:3001',
+        target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:3001',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },

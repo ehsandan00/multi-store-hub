@@ -27,7 +27,7 @@ function FieldShell({
       {label && (
         <label htmlFor={htmlFor} className="label">
           {label}
-          {required && <span className="ml-0.5 text-rose-600">*</span>}
+          {required && <span className="ms-0.5 text-rose-600">*</span>}
         </label>
       )}
       {children}

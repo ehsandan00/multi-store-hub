@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProductType } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -233,6 +233,8 @@ export class SyncService {
         siteSku: m?.siteSku ?? null,
         siteProductId: m?.siteProductId ?? null,
         siteSpecificTitle: m?.siteSpecificTitle ?? null,
+        productType: p.productType ?? ProductType.SIMPLE,
+        parentId: p.parentId ?? null,
       };
     });
   }
@@ -242,16 +244,19 @@ export class SyncService {
   private toWcPayload(item: ResolvedPushItem): WcProductPayload {
     const name = item.siteSpecificTitle || item.name;
     const sku = item.siteSku || item.skuMaster;
+    const isVariable = item.productType === 'VARIABLE';
+    const isVariation = item.productType === 'VARIATION';
     const payload: WcProductPayload = {
       sku,
       name,
-      type: 'simple',
+      type: isVariable ? 'variable' : isVariation ? 'variation' : 'simple',
       regular_price: item.basePrice,
-      manage_stock: true,
-      stock_quantity: item.totalStock,
+      manage_stock: !isVariable,
+      stock_quantity: isVariable ? undefined : item.totalStock,
       status: 'publish',
     };
     if (item.description) payload.description = item.description;
+    // Hub-only photos (hubPhotoPath) are intentionally excluded from store sync.
     if (item.imageUrl) payload.images = [{ src: item.imageUrl }];
     if (item.category) {
       payload.categories = [{ name: item.category }];
@@ -444,6 +449,21 @@ export class SyncService {
       }),
     ]);
     return { data: rows, total, page, pageSize };
+  }
+
+  async deleteLog(id: string): Promise<void> {
+    const row = await this.prisma.syncLog.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Sync log not found');
+    await this.prisma.syncLog.delete({ where: { id } });
+  }
+
+  async clearFailedLogs(siteId?: string): Promise<{ deleted: number }> {
+    const where: Prisma.SyncLogWhereInput = {
+      status: { in: ['failed', 'partial'] },
+      ...(siteId ? { siteId } : {}),
+    };
+    const res = await this.prisma.syncLog.deleteMany({ where });
+    return { deleted: res.count };
   }
 
   async getJob(id: string) {

@@ -31,9 +31,9 @@ describe('Login page', () => {
 
   it('renders email + password fields and a submit button', () => {
     renderLogin();
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/ایمیل/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/رمز عبور/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ورود/ })).toBeInTheDocument();
   });
 
   it('calls authApi.login with lowercased email and stores session on success', async () => {
@@ -48,9 +48,9 @@ describe('Login page', () => {
 
     renderLogin();
 
-    await user.type(screen.getByLabelText(/email/i), 'ADMIN@HUB.LOCAL');
-    await user.type(screen.getByLabelText(/password/i), 'Admin@123');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/ایمیل/i), 'ADMIN@HUB.LOCAL');
+    await user.type(screen.getByLabelText(/رمز عبور/i), 'Admin@123');
+    await user.click(screen.getByRole('button', { name: /ورود/ }));
 
     expect(loginSpy).toHaveBeenCalledWith('admin@hub.local', 'Admin@123');
     expect(useAuthStore.getState().accessToken).toBe('access-tok');
@@ -66,11 +66,11 @@ describe('Login page', () => {
 
     renderLogin();
 
-    await user.type(screen.getByLabelText(/email/i), 'x@y.z');
-    await user.type(screen.getByLabelText(/password/i), 'wrongpwd');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/ایمیل/i), 'x@y.z');
+    await user.type(screen.getByLabelText(/رمز عبور/i), 'wrongpwd');
+    await user.click(screen.getByRole('button', { name: /ورود/ }));
 
-    expect(await screen.findByText(/invalid email or password/i)).toBeInTheDocument();
+    expect(await screen.findByText(/ایمیل یا رمز عبور نادرست/i)).toBeInTheDocument();
     expect(useAuthStore.getState().accessToken).toBeNull();
   });
 });

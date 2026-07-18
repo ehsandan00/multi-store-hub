@@ -25,9 +25,25 @@ async function bootstrap() {
   app.use(json({ limit: '2mb' }));
   app.use(urlencoded({ limit: '2mb', extended: true }));
 
+  const corsOrigins = corsOrigin.split(',').map((o) => o.trim());
+  const isPrivateLanOrigin = (origin: string) =>
+    /^https?:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(
+      origin,
+    );
+
   // CORS
   app.enableCors({
-    origin: corsOrigin.split(',').map((o) => o.trim()),
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      if (!isProd && isPrivateLanOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });

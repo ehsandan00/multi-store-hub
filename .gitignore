@@ -44,7 +44,8 @@ packages/backend/prisma/migrations/dev.db*
 packages/backend/**/*.sqlite
 packages/backend/**/*.sqlite-journal
 
-# Misc
-.cache/
+# Hub-only product photos (never synced to stores)
+packages/backend/data/hub-photos/
+
 .turbo/
 *.pem

@@ -81,8 +81,8 @@ describe('Import/Export page', () => {
 
   it('renders the export section and the upload dropzone for admins', async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByText('Export')).toBeInTheDocument());
-    expect(screen.getByText(/choose an \.xlsx file/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('خروجی')).toBeInTheDocument());
+    expect(screen.getByText(/برای انتخاب فایل \.xlsx/i)).toBeInTheDocument();
     // Site dropdowns (filter + WooCommerce export) populate after the sites query resolves
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
@@ -96,8 +96,8 @@ describe('Import/Export page', () => {
       refreshToken: 'rtok',
     });
     renderPage();
-    await waitFor(() => expect(screen.getByText('Export')).toBeInTheDocument());
-    expect(screen.queryByText(/choose an \.xlsx file/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('خروجی')).toBeInTheDocument());
+    expect(screen.queryByText(/برای انتخاب فایل \.xlsx/i)).not.toBeInTheDocument();
   });
 
   it('shows a preview summary (new/update/errors) after a successful upload', async () => {
@@ -107,21 +107,20 @@ describe('Import/Export page', () => {
       .mockResolvedValue(preview);
 
     renderPage();
-    await waitFor(() => expect(screen.getByText('Export')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('خروجی')).toBeInTheDocument());
 
     const file = new File(['fake'], 'import.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
-    const input = screen.getByLabelText(/click to choose an \.xlsx file/i) as HTMLInputElement;
+    const input = screen.getByLabelText(/برای انتخاب فایل \.xlsx/i) as HTMLInputElement;
     await user.upload(input, file);
 
     await waitFor(() => expect(uploadSpy).toHaveBeenCalledTimes(1));
     // Error block is unique
     await waitFor(() => expect(screen.getByText(/Invalid base_price/i)).toBeInTheDocument());
     // Confirm button reflects the count of valid rows (1 new + 1 update = 2)
-    expect(screen.getByRole('button', { name: /Confirm & import 2 row/i })).toBeInTheDocument();
-    // Stat tiles present (New + Updates labels are uppercased in the Stat component)
-    expect(screen.getByText(/^Updates$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /تأیید و ورود 2 ردیف/i })).toBeInTheDocument();
+    expect(screen.getAllByText('به‌روزرسانی').length).toBeGreaterThan(0);
   });
 
   it('disables the confirm button when every row has an error', async () => {
@@ -140,16 +139,16 @@ describe('Import/Export page', () => {
     });
 
     renderPage();
-    await waitFor(() => expect(screen.getByText('Export')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('خروجی')).toBeInTheDocument());
     const file = new File(['fake'], 'import.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
-    const input = screen.getByLabelText(/click to choose an \.xlsx file/i) as HTMLInputElement;
+    const input = screen.getByLabelText(/برای انتخاب فایل \.xlsx/i) as HTMLInputElement;
     await user.upload(input, file);
 
     await waitFor(() =>
-      expect(screen.getByText(/Nothing to commit/i)).toBeInTheDocument(),
+      expect(screen.getByText(/چیزی برای اعمال نیست/i)).toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: /Confirm & import/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /تأیید و ورود/i })).toBeDisabled();
   });
 });

@@ -9,7 +9,7 @@
  *   5. ImportJob updated to COMPLETED with a final report
  */
 
-import type { ImportJobStatus } from '@prisma/client';
+import type { ImportJobStatus, ProductType } from '@prisma/client';
 
 export type ImportJobKind = 'PRODUCT_IMPORT';
 
@@ -25,8 +25,31 @@ export interface RawImportRow {
   barcode?: string;
   imageUrl?: string;
   description?: string;
+  productType?: string;
+  parentSku?: string;
+  variationAttributes?: string;
   /** Site SKU overrides keyed by site name, e.g. { "Store IR": "IR-SKU-1" } */
   siteSkus?: Record<string, string>;
+}
+
+export interface RawSiteMappingRow {
+  row: number;
+  skuMaster?: string;
+  siteName?: string;
+  siteSku?: string;
+  siteProductId?: string;
+  siteSpecificTitle?: string;
+  matchStatus?: string;
+}
+
+export interface ValidatedSiteMappingRow {
+  row: number;
+  skuMaster: string;
+  siteName: string;
+  siteSku?: string | null;
+  siteProductId?: string | null;
+  siteSpecificTitle?: string | null;
+  matchStatus?: string | null;
 }
 
 export interface ValidatedImportRow {
@@ -41,6 +64,9 @@ export interface ValidatedImportRow {
   barcode?: string | null;
   imageUrl?: string | null;
   description?: string | null;
+  productType?: ProductType;
+  parentSku?: string | null;
+  variationAttributes?: Record<string, string> | null;
   siteSkus?: Record<string, string>;
   /** "create" | "update" — resolved against current DB state at preview time */
   action: 'create' | 'update';
@@ -61,6 +87,7 @@ export interface ImportPreview {
   newCount: number;
   updateCount: number;
   errorCount: number;
+  mappingRowCount?: number;
   errors: ImportError[];
   /** Sample of validated rows (first N) for UI display; full set stored on the job. */
   rowsPreview: ValidatedImportRow[];

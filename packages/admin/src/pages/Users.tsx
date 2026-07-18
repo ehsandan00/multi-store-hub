@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usersApi, toApiError } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -19,6 +20,7 @@ const ROLE_TONE: Record<Role, 'blue' | 'amber' | 'gray'> = {
 };
 
 export function UsersPage() {
+  const { t } = useTranslation();
   const toast = useToast();
   const qc = useQueryClient();
   const { user: currentUser } = useAuthStore();
@@ -32,19 +34,19 @@ export function UsersPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => usersApi.remove(id),
     onSuccess: () => {
-      toast.success('User deleted');
+      toast.success(t('users.deletedSuccess'));
       setDeleteTarget(null);
       qc.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (err) => toast.error('Failed to delete user', toApiError(err).message),
+    onError: (err) => toast.error(t('users.deleteFailed'), toApiError(err).message),
   });
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Users &amp; roles</h1>
-          <p className="mt-1 text-sm text-slate-500">Admin-only. Role changes are audited.</p>
+          <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t('users.title')}</h1>
+          <p className="mt-1 text-sm text-slate-500">{t('users.subtitle')}</p>
         </div>
         <Button
           onClick={() => {
@@ -52,11 +54,10 @@ export function UsersPage() {
             setFormOpen(true);
           }}
         >
-          + New user
+          {t('users.newUser')}
         </Button>
       </div>
 
-      {/* Mobile cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {listQ.isLoading && (
           <div className="card flex justify-center p-6">
@@ -70,12 +71,22 @@ export function UsersPage() {
                 <p className="truncate font-semibold text-slate-900">{u.fullName}</p>
                 <p className="mt-0.5 truncate text-xs text-slate-500">{u.email}</p>
               </div>
-              <Badge tone={ROLE_TONE[u.role]}>{u.role.replace('_', ' ')}</Badge>
+              <Badge tone={ROLE_TONE[u.role]}>{t(`roles.${u.role}`)}</Badge>
             </div>
-            <p className="mt-2 text-xs text-slate-400">Created {formatDateTime(u.createdAt)}</p>
+            <p className="mt-2 text-xs text-slate-400">
+              {t('users.createdAt', { date: formatDateTime(u.createdAt) })}
+            </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={() => { setEditing(u); setFormOpen(true); }} type="button">
-                Edit
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setEditing(u);
+                  setFormOpen(true);
+                }}
+                type="button"
+              >
+                {t('common.edit')}
               </Button>
               <Button
                 variant="ghost"
@@ -85,24 +96,23 @@ export function UsersPage() {
                 onClick={() => setDeleteTarget(u)}
                 type="button"
               >
-                Delete
+                {t('common.delete')}
               </Button>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Desktop table */}
       <div className="table-wrap hidden md:block">
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th className="text-right">Actions</th>
+              <th>{t('users.name')}</th>
+              <th>{t('users.email')}</th>
+              <th>{t('users.role')}</th>
+              <th>{t('users.status')}</th>
+              <th>{t('users.created')}</th>
+              <th className="text-end">{t('products.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -117,20 +127,29 @@ export function UsersPage() {
               <tr key={u.id}>
                 <td className="font-medium text-slate-900">{u.fullName}</td>
                 <td className="text-slate-600">{u.email}</td>
-                <td><Badge tone={ROLE_TONE[u.role]}>{u.role.replace('_', ' ')}</Badge></td>
                 <td>
-                  {u.isActive ? <Badge tone="green">active</Badge> : <Badge tone="gray">inactive</Badge>}
+                  <Badge tone={ROLE_TONE[u.role]}>{t(`roles.${u.role}`)}</Badge>
+                </td>
+                <td>
+                  {u.isActive ? (
+                    <Badge tone="green">{t('common.active')}</Badge>
+                  ) : (
+                    <Badge tone="gray">{t('common.inactive')}</Badge>
+                  )}
                 </td>
                 <td>{formatDateTime(u.createdAt)}</td>
-                <td className="text-right">
+                <td className="text-end">
                   <div className="flex items-center justify-end gap-1">
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => { setEditing(u); setFormOpen(true); }}
+                      onClick={() => {
+                        setEditing(u);
+                        setFormOpen(true);
+                      }}
                       type="button"
                     >
-                      Edit
+                      {t('common.edit')}
                     </Button>
                     <Button
                       variant="ghost"
@@ -139,9 +158,9 @@ export function UsersPage() {
                       disabled={u.id === currentUser?.id}
                       onClick={() => setDeleteTarget(u)}
                       type="button"
-                      title={u.id === currentUser?.id ? 'You cannot delete yourself' : undefined}
+                      title={u.id === currentUser?.id ? t('users.cannotDeleteSelf') : undefined}
                     >
-                      Delete
+                      {t('common.delete')}
                     </Button>
                   </div>
                 </td>
@@ -157,14 +176,12 @@ export function UsersPage() {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Delete user"
-        message={
-          <>
-            Delete <strong>{deleteTarget?.fullName}</strong> ({deleteTarget?.email})? This is
-            audited and cannot be undone.
-          </>
-        }
-        confirmLabel="Delete"
+        title={t('users.deleteTitle')}
+        message={t('users.deleteAudited', {
+          fullName: deleteTarget?.fullName,
+          email: deleteTarget?.email,
+        })}
+        confirmLabel={t('common.delete')}
         destructive
         loading={deleteMut.isPending}
         onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
@@ -181,6 +198,7 @@ interface FormProps {
 }
 
 function UserFormModal({ open, onClose, initial }: FormProps) {
+  const { t } = useTranslation();
   const isEdit = !!initial;
   const toast = useToast();
   const qc = useQueryClient();
@@ -197,38 +215,38 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
   const createMut = useMutation({
     mutationFn: (p: CreateUserPayload) => usersApi.create(p),
     onSuccess: () => {
-      toast.success('User created');
+      toast.success(t('users.createdSuccess'));
       qc.invalidateQueries({ queryKey: ['users'] });
       onClose();
     },
-    onError: (err) => toast.error('Failed to create user', toApiError(err).message),
+    onError: (err) => toast.error(t('users.createFailed'), toApiError(err).message),
   });
 
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: UpdateUserPayload }) => usersApi.update(id, p),
     onSuccess: () => {
-      toast.success('User updated');
+      toast.success(t('users.updatedSuccess'));
       qc.invalidateQueries({ queryKey: ['users'] });
       onClose();
     },
-    onError: (err) => toast.error('Failed to update user', toApiError(err).message),
+    onError: (err) => toast.error(t('users.updateFailed'), toApiError(err).message),
   });
 
   const pwdMut = useMutation({
     mutationFn: ({ id, pw }: { id: string; pw: string }) => usersApi.changePassword(id, pw),
     onSuccess: () => {
-      toast.success('Password changed');
+      toast.success(t('users.passwordChanged'));
       setChangePasswordOpen(false);
       setNewPassword('');
     },
-    onError: (err) => toast.error('Failed to change password', toApiError(err).message),
+    onError: (err) => toast.error(t('users.passwordChangeFailed'), toApiError(err).message),
   });
 
   function validate(): boolean {
     const e: Record<string, string> = {};
-    if (!email.trim()) e.email = 'Email is required';
-    if (!isEdit && !password.trim()) e.password = 'Password is required (≥ 8 chars)';
-    if (!fullName.trim()) e.fullName = 'Full name is required';
+    if (!email.trim()) e.email = t('users.validation.emailRequired');
+    if (!isEdit && !password.trim()) e.password = t('users.validation.passwordRequired');
+    if (!fullName.trim()) e.fullName = t('users.validation.fullNameRequired');
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -252,15 +270,15 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? `Edit ${initial?.fullName}` : 'New user'}
+      title={isEdit ? t('users.editTitle', { fullName: initial?.fullName }) : t('users.newTitle')}
       size="md"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} type="button" disabled={submitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit" form="user-form" loading={submitting}>
-            {isEdit ? 'Save changes' : 'Create user'}
+            {isEdit ? t('common.save') : t('users.createUser')}
           </Button>
         </>
       }
@@ -268,7 +286,7 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
       <form id="user-form" onSubmit={handleSubmit} className="space-y-4">
         <Input
           id="fullName"
-          label="Full name"
+          label={t('users.fullName')}
           required
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
@@ -276,37 +294,37 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
         />
         <Input
           id="email"
-          label="Email"
+          label={t('users.email')}
           type="email"
           required
           disabled={isEdit}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           error={errors.email}
-          hint={isEdit ? 'Email cannot be changed' : undefined}
+          hint={isEdit ? t('users.emailHint') : undefined}
         />
         {!isEdit && (
           <Input
             id="password"
-            label="Password"
+            label={t('users.password')}
             type="password"
             required
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             error={errors.password}
-            hint="Minimum 8 characters"
+            hint={t('users.passwordHint')}
           />
         )}
         <Select
           id="role"
-          label="Role"
+          label={t('users.role')}
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
         >
-          <option value="ADMIN">Admin — full access</option>
-          <option value="WAREHOUSE_STAFF">Warehouse staff — inventory only</option>
-          <option value="VIEWER">Viewer — read-only</option>
+          <option value="ADMIN">{t('users.roleAdmin')}</option>
+          <option value="WAREHOUSE_STAFF">{t('users.roleWarehouse')}</option>
+          <option value="VIEWER">{t('users.roleViewer')}</option>
         </Select>
         {isEdit && (
           <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -316,7 +334,7 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
               onChange={(e) => setIsActive(e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            Active
+            {t('common.active')}
           </label>
         )}
       </form>
@@ -325,8 +343,8 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
         <div className="mt-5 border-t border-slate-100 pt-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-700">Password</p>
-              <p className="text-xs text-slate-500">Set a new password for this user.</p>
+              <p className="text-sm font-medium text-slate-700">{t('users.passwordSection')}</p>
+              <p className="text-xs text-slate-500">{t('users.passwordSectionHint')}</p>
             </div>
             <Button
               variant="secondary"
@@ -334,7 +352,7 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
               onClick={() => setChangePasswordOpen(true)}
               type="button"
             >
-              Change password
+              {t('users.changePassword')}
             </Button>
           </div>
         </div>
@@ -343,7 +361,7 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
       <Modal
         open={changePasswordOpen}
         onClose={() => setChangePasswordOpen(false)}
-        title="Change password"
+        title={t('users.changePassword')}
         size="sm"
         footer={
           <>
@@ -353,7 +371,7 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
               type="button"
               disabled={pwdMut.isPending}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               type="button"
@@ -361,19 +379,19 @@ function UserFormModal({ open, onClose, initial }: FormProps) {
               onClick={() => initial && pwdMut.mutate({ id: initial.id, pw: newPassword })}
               disabled={newPassword.length < 8}
             >
-              Set password
+              {t('users.setPassword')}
             </Button>
           </>
         }
       >
         <Input
           id="newPassword"
-          label="New password"
+          label={t('users.newPassword')}
           type="password"
           minLength={8}
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
-          hint="Minimum 8 characters"
+          hint={t('users.passwordHint')}
         />
       </Modal>
     </Modal>

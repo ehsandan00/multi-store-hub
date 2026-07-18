@@ -13,7 +13,7 @@ export class DashboardController {
   @Get('summary')
   @ApiOperation({
     summary:
-      'Aggregated KPIs for the admin dashboard: revenue series (last 30d), order status breakdown, top products, recent orders, low stock.',
+      'Aggregated KPIs: revenue series, order status, top products, inventory value, today orders, latest syncs, alerts.',
   })
   async summary() {
     return this.dashboard.getSummary();

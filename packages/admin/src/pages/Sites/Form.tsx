@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { sitesApi, toApiError } from '../../lib/api';
 import { useToast } from '../../lib/toast';
@@ -22,25 +23,33 @@ const EMPTY: CreateSitePayload = {
   isActive: true,
 };
 
+function buildForm(site?: SafeSite | null): CreateSitePayload {
+  return site
+    ? {
+        name: site.name,
+        baseUrl: site.baseUrl,
+        consumerKey: '',
+        consumerSecret: '',
+        networkRoute: site.networkRoute,
+        isActive: site.isActive,
+      }
+    : { ...EMPTY };
+}
+
 export function SiteFormModal({ open, onClose, initial }: Props) {
+  const { t } = useTranslation();
   const isEdit = !!initial;
   const toast = useToast();
   const qc = useQueryClient();
 
-  const [form, setForm] = useState<CreateSitePayload>(() =>
-    initial
-      ? {
-          name: initial.name,
-          baseUrl: initial.baseUrl,
-          // Don't prefill credentials — backend masks them; user must re-enter to change.
-          consumerKey: '',
-          consumerSecret: '',
-          networkRoute: initial.networkRoute,
-          isActive: initial.isActive,
-        }
-      : EMPTY,
-  );
+  const [form, setForm] = useState<CreateSitePayload>(() => buildForm(initial));
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    setForm(buildForm(initial));
+    setErrors({});
+  }, [open, initial?.id, initial?.networkRoute, initial?.name, initial?.baseUrl, initial?.isActive]);
 
   function set<K extends keyof CreateSitePayload>(key: K, value: CreateSitePayload[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -49,13 +58,13 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
 
   function validate(): boolean {
     const e: Record<string, string> = {};
-    if (!form.name.trim()) e.name = 'Name is required';
-    if (!form.baseUrl.trim()) e.baseUrl = 'Base URL is required';
+    if (!form.name.trim()) e.name = t('sites.validation.nameRequired');
+    if (!form.baseUrl.trim()) e.baseUrl = t('sites.validation.baseUrlRequired');
     else if (!/^https?:\/\//i.test(form.baseUrl.trim()))
-      e.baseUrl = 'Must start with http:// or https://';
+      e.baseUrl = t('sites.validation.baseUrlFormat');
     if (!isEdit) {
-      if (!form.consumerKey.trim()) e.consumerKey = 'Consumer key is required';
-      if (!form.consumerSecret.trim()) e.consumerSecret = 'Consumer secret is required';
+      if (!form.consumerKey.trim()) e.consumerKey = t('sites.validation.consumerKeyRequired');
+      if (!form.consumerSecret.trim()) e.consumerSecret = t('sites.validation.consumerSecretRequired');
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -64,21 +73,21 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
   const createMut = useMutation({
     mutationFn: (p: CreateSitePayload) => sitesApi.create(p),
     onSuccess: () => {
-      toast.success('Site created');
+      toast.success(t('sites.createdSuccess'));
       qc.invalidateQueries({ queryKey: ['sites'] });
       onClose();
     },
-    onError: (err) => toast.error('Failed to create site', toApiError(err).message),
+    onError: (err) => toast.error(t('sites.createFailed'), toApiError(err).message),
   });
 
   const updateMut = useMutation({
     mutationFn: ({ id, p }: { id: string; p: UpdateSitePayload }) => sitesApi.update(id, p),
     onSuccess: () => {
-      toast.success('Site updated');
+      toast.success(t('sites.updatedSuccess'));
       qc.invalidateQueries({ queryKey: ['sites'] });
       onClose();
     },
-    onError: (err) => toast.error('Failed to update site', toApiError(err).message),
+    onError: (err) => toast.error(t('sites.updateFailed'), toApiError(err).message),
   });
 
   function handleSubmit(e: FormEvent) {
@@ -86,7 +95,6 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
     if (!validate()) return;
 
     if (isEdit && initial) {
-      // Only send credentials if the user entered new ones.
       const payload: UpdateSitePayload = {
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim(),
@@ -113,20 +121,16 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? `Edit ${initial?.name}` : 'Add site'}
-      description={
-        isEdit
-          ? 'Update site settings. Leave credential fields blank to keep existing values.'
-          : 'Configure a WooCommerce store. Credentials are encrypted at rest (AES-256-GCM).'
-      }
+      title={isEdit ? t('sites.editTitle', { name: initial?.name }) : t('sites.addTitle')}
+      description={isEdit ? t('sites.descEdit') : t('sites.descNew')}
       size="lg"
       footer={
         <>
           <Button variant="secondary" onClick={onClose} type="button" disabled={submitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit" form="site-form" loading={submitting}>
-            {isEdit ? 'Save changes' : 'Add site'}
+            {isEdit ? t('common.save') : t('sites.saveSite')}
           </Button>
         </>
       }
@@ -134,16 +138,15 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
       <form id="site-form" onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Input
           id="name"
-          label="Display name"
+          label={t('sites.displayName')}
           required
           value={form.name}
           onChange={(e) => set('name', e.target.value)}
           error={errors.name}
-          placeholder="IR-hosted store"
         />
         <Input
           id="baseUrl"
-          label="Base URL"
+          label={t('sites.baseUrl')}
           required
           value={form.baseUrl}
           onChange={(e) => set('baseUrl', e.target.value)}
@@ -152,7 +155,7 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
         />
         <Input
           id="consumerKey"
-          label={isEdit ? 'Consumer key (leave blank to keep)' : 'Consumer key'}
+          label={isEdit ? t('sites.consumerKeyEdit') : t('sites.consumerKey')}
           required={!isEdit}
           value={form.consumerKey}
           onChange={(e) => set('consumerKey', e.target.value)}
@@ -161,7 +164,7 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
         />
         <Input
           id="consumerSecret"
-          label={isEdit ? 'Consumer secret (leave blank to keep)' : 'Consumer secret'}
+          label={isEdit ? t('sites.consumerSecretEdit') : t('sites.consumerSecret')}
           required={!isEdit}
           type="password"
           value={form.consumerSecret}
@@ -169,37 +172,36 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
           error={errors.consumerSecret}
           placeholder="cs_xxxxxxxxxxxxxxxxxxxx"
         />
-        <div>
-          <label className="label">Network route</label>
+        <div className="sm:col-span-2">
+          <label className="label">{t('sites.networkRoute')}</label>
           <div className="grid grid-cols-2 gap-2">
-            {(['DIRECT', 'VIA_FOREIGN_PROXY'] as NetworkRoute[]).map((route) => (
+            {(['VIA_FOREIGN_PROXY', 'DIRECT'] as NetworkRoute[]).map((route) => (
               <button
                 key={route}
                 type="button"
                 onClick={() => set('networkRoute', route)}
                 className={
-                  'rounded-lg border px-3 py-2 text-sm font-medium transition-colors ' +
+                  'rounded-lg border px-3 py-2 text-start text-sm font-medium transition-colors ' +
                   (form.networkRoute === route
                     ? 'border-brand-500 bg-brand-50 text-brand-700'
                     : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50')
                 }
               >
                 <div className="text-xs uppercase tracking-wide opacity-70">
-                  {route === 'DIRECT' ? 'Group B' : 'Group A'}
+                  {route === 'DIRECT' ? t('sites.groupB') : t('sites.groupA')}
                 </div>
                 <div className="mt-0.5">
-                  {route === 'DIRECT'
-                    ? 'Direct (IR host)'
-                    : 'Via foreign proxy'}
+                  {route === 'DIRECT' ? t('sites.routeDirect') : t('sites.routeProxy')}
                 </div>
               </button>
             ))}
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {form.networkRoute === 'DIRECT'
-              ? 'Use for IR-hosted sites that reject foreign IPs.'
-              : 'Use for censored sites only reachable from a non-Iranian IP.'}
+              ? t('sites.routeDirectHint')
+              : t('sites.routeProxyHint')}
           </p>
+          <p className="mt-1 text-xs text-slate-400">{t('sites.proxyEnvHint')}</p>
         </div>
         <div className="flex items-end">
           <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -209,7 +211,7 @@ export function SiteFormModal({ open, onClose, initial }: Props) {
               onChange={(e) => set('isActive', e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            Active
+            {t('common.active')}
           </label>
         </div>
       </form>

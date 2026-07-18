@@ -16,6 +16,22 @@ const summary: DashboardSummary = {
     activeSites: 6,
     totalOrders: 120,
     ordersLast30d: 75,
+    inventoryUnits: 980,
+    inventoryValue: '12500.00',
+    ordersToday: 5,
+    revenueToday: '249.50',
+    expiringSoonCount: 2,
+    pendingMappingReviews: 1,
+    failedSyncCount: 1,
+    duplicateOnSiteCount: 0,
+    activeAlerts: 7,
+  },
+  alertBreakdown: {
+    lowStock: 3,
+    expiringSoon: 2,
+    failedSyncs: 1,
+    pendingMappingReviews: 1,
+    duplicateOnSite: 0,
   },
   revenueSeries: [
     { day: '2026-07-04', revenue: '120.00', orders: 2 },
@@ -25,11 +41,28 @@ const summary: DashboardSummary = {
     { status: 'completed', count: 40 },
     { status: 'processing', count: 35 },
   ],
+  logisticsStatusCounts: {
+    SENT: 8,
+    NEED_PRODUCT: 3,
+    CANCELED: 2,
+  },
   topProducts: [
     { productId: 'p1', skuMaster: 'SKU-1', name: 'Alpha', quantity: 12, revenue: '240.00' },
   ],
   lowStockProducts: [
     { id: 'p2', skuMaster: 'SKU-2', name: 'Beta', totalStock: 1, lowStockThreshold: 5, category: 'Snacks' },
+  ],
+  expiringSoonProducts: [
+    { id: 'p3', skuMaster: 'SKU-3', name: 'Gamma', totalStock: 10, expiryDate: '2026-07-12T00:00:00.000Z' },
+  ],
+  latestSyncs: [
+    {
+      siteId: 's1',
+      siteName: 'Store A',
+      syncType: 'product_push',
+      status: 'success',
+      createdAt: '2026-07-05T08:00:00.000Z',
+    },
   ],
   recentOrders: [
     {
@@ -69,42 +102,36 @@ describe('Dashboard (Phase 4 aggregated summary)', () => {
     });
     vi.restoreAllMocks();
     vi.spyOn(apiModule.dashboardApi, 'summary').mockResolvedValue(summary);
-    // The dashboard still renders the upcoming-expiries widget which calls productsApi.list.
-    vi.spyOn(apiModule.productsApi, 'list').mockResolvedValue({
-      data: [],
-      total: 0,
-      page: 1,
-      pageSize: 200,
-      totalPages: 0,
-    });
   });
 
   it('renders the KPI cards from dashboardApi.summary', async () => {
     renderDashboard();
     await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument());
-    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText(/6 \/ 8/)).toBeInTheDocument();
     expect(screen.getByText('75')).toBeInTheDocument();
+    expect(screen.getByText('لجستیک: ارسال‌شده')).toBeInTheDocument();
+    expect(screen.getByText('لجستیک: نیاز به محصول')).toBeInTheDocument();
+    expect(screen.getByText('لجستیک: لغوشده')).toBeInTheDocument();
   });
 
   it('renders the revenue, status breakdown, top products, and recent orders sections', async () => {
     renderDashboard();
-    await waitFor(() => expect(screen.getByText('Revenue (last 30 days)')).toBeInTheDocument());
-    expect(screen.getByText('Order status (last 30d)')).toBeInTheDocument();
-    expect(screen.getByText('Top products (by qty, last 30d)')).toBeInTheDocument();
-    expect(screen.getByText('Recent orders')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/درآمد \(۳۰ روز گذشته\)/)).toBeInTheDocument());
+    expect(screen.getByText(/وضعیت سفارش \(۳۰ روز\)/)).toBeInTheDocument();
+    expect(screen.getByText(/پرفروش‌ترین محصولات \(۳۰ روز\)/)).toBeInTheDocument();
+    expect(screen.getByText(/سفارش‌های اخیر/)).toBeInTheDocument();
   });
 
   it('renders recent orders with site name and status', async () => {
     renderDashboard();
     await waitFor(() => expect(screen.getAllByText('Store A').length).toBeGreaterThan(0));
-    // 'processing' appears in both the status breakdown and the recent orders row.
-    expect(screen.getAllByText('processing').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/در حال پردازش/).length).toBeGreaterThan(0);
   });
 
-  it('renders low-stock products with the low badge', async () => {
+  it('renders latest sync status section', async () => {
     renderDashboard();
-    await waitFor(() => expect(screen.getByText('Beta')).toBeInTheDocument());
-    expect(screen.getByText('low')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/آخرین وضعیت همگام‌سازی/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('product_push')).toBeInTheDocument());
   });
 });

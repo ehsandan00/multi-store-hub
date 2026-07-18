@@ -173,12 +173,25 @@ export class SitesService {
         path: '/wp-json/wc/v3/products?per_page=1',
       });
 
+      const body = res.body;
+      const validJson =
+        Array.isArray(body) ||
+        (body !== null && typeof body === 'object' && !('code' in (body as object)));
       const result: TestConnectionResult = {
-        ok: res.status >= 200 && res.status < 300,
+        ok: res.status >= 200 && res.status < 300 && validJson,
         latencyMs: res.latencyMs,
         routeUsed: res.routeUsed,
         attempts: res.attempts,
         status: res.status,
+        ...(validJson
+          ? {}
+          : {
+              error: {
+                code: 'INVALID_WC_RESPONSE',
+                message:
+                  'WooCommerce did not return JSON (check permalinks, HTTPS, and REST API keys)',
+              },
+            }),
       };
       await this.recordSyncLog(
         s.id,

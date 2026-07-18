@@ -1,18 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { dashboardApi, toApiError } from '../lib/api';
+import { isoDateDaysAgo, isoDateLocal } from '../lib/barcode';
+import { getAlertBreakdown } from '../lib/alert-breakdown';
 import { useAuthStore } from '../lib/auth-store';
 import { Card } from '../components/ui/Card';
 import { Spinner } from '../components/ui/Spinner';
 import { Badge } from '../components/ui/Badge';
 import { formatDate, daysUntil } from '../lib/utils';
-import type { Role, RevenueSeriesPoint } from '../lib/types';
-import { productsApi } from '../lib/api';
+import type { RevenueSeriesPoint } from '../lib/types';
 
-const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: 'Admin',
-  WAREHOUSE_STAFF: 'Warehouse staff',
-  VIEWER: 'Viewer',
+const SYNC_STATUS_TONE: Record<string, 'gray' | 'green' | 'red' | 'amber'> = {
+  success: 'green',
+  failed: 'red',
+  partial: 'amber',
 };
 
 const STATUS_TONE: Record<string, 'gray' | 'green' | 'red' | 'amber' | 'blue'> = {
@@ -26,7 +28,10 @@ const STATUS_TONE: Record<string, 'gray' | 'green' | 'red' | 'amber' | 'blue'> =
 };
 
 export function Dashboard() {
+  const { t } = useTranslation();
   const { user } = useAuthStore();
+  const today = isoDateLocal();
+  const since30d = isoDateDaysAgo(30);
 
   const summaryQ = useQuery({
     queryKey: ['dashboard', 'summary'],
@@ -35,67 +40,152 @@ export function Dashboard() {
   });
 
   const k = summaryQ.data?.kpis;
+  const alerts = getAlertBreakdown(summaryQ.data);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Dashboard</h1>
+        <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t('dashboard.title')}</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Welcome back, {user?.email}. You are signed in as{' '}
-          <Badge tone="blue">{user && ROLE_LABEL[user.role]}</Badge>
+          {t('dashboard.welcome', { email: user?.email })}{' '}
+          <Badge tone="blue">{user && t(`roles.${user.role}`)}</Badge>
         </p>
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-4">
         <KpiCard
-          label="Total products"
+          label={t('dashboard.totalProducts')}
           value={summaryQ.isLoading ? null : String(k?.totalProducts ?? 0)}
+          hint={
+            summaryQ.isLoading
+              ? undefined
+              : t('dashboard.unitsInStock', { count: k?.inventoryUnits ?? 0 })
+          }
+          to="/products"
         />
         <KpiCard
-          label="Low-stock alerts"
+          label={t('dashboard.inventoryValue')}
+          value={summaryQ.isLoading ? null : formatMoneyShort(k?.inventoryValue ?? '0')}
+          to="/products"
+        />
+        <KpiCard
+          label={t('dashboard.ordersToday')}
+          value={summaryQ.isLoading ? null : String(k?.ordersToday ?? 0)}
+          hint={summaryQ.isLoading ? undefined : formatMoneyShort(k?.revenueToday ?? '0')}
+          to={`/orders?dateFrom=${today}&dateTo=${today}`}
+        />
+        <KpiCard
+          label={t('dashboard.ordersLast30d')}
+          value={summaryQ.isLoading ? null : String(k?.ordersLast30d ?? 0)}
+          hint={t('dashboard.allTimeOrders', { count: k?.totalOrders ?? 0 })}
+          to={`/orders?dateFrom=${since30d}&dateTo=${today}`}
+        />
+        <KpiCard
+          label={t('dashboard.logisticsSent')}
+          value={
+            summaryQ.isLoading
+              ? null
+              : String(summaryQ.data?.logisticsStatusCounts.SENT ?? 0)
+          }
+          tone="green"
+          to="/logistics"
+        />
+        <KpiCard
+          label={t('dashboard.logisticsNeedProduct')}
+          value={
+            summaryQ.isLoading
+              ? null
+              : String(summaryQ.data?.logisticsStatusCounts.NEED_PRODUCT ?? 0)
+          }
+          tone={
+            (summaryQ.data?.logisticsStatusCounts.NEED_PRODUCT ?? 0) > 0 ? 'amber' : 'gray'
+          }
+          to="/logistics"
+        />
+        <KpiCard
+          label={t('dashboard.logisticsCanceled')}
+          value={
+            summaryQ.isLoading
+              ? null
+              : String(summaryQ.data?.logisticsStatusCounts.CANCELED ?? 0)
+          }
+          tone={(summaryQ.data?.logisticsStatusCounts.CANCELED ?? 0) > 0 ? 'red' : 'gray'}
+          to="/logistics"
+        />
+        <KpiCard
+          label={t('dashboard.lowStockAlerts')}
           value={summaryQ.isLoading ? null : String(k?.lowStockCount ?? 0)}
           tone={(k?.lowStockCount ?? 0) > 0 ? 'amber' : 'gray'}
+          to="/products?lowStock=1"
         />
         <KpiCard
-          label="Active sites"
-          value={summaryQ.isLoading ? null : `${k?.activeSites ?? 0} / ${k?.totalSites ?? 0}`}
+          label={t('dashboard.expiringSoon')}
+          value={summaryQ.isLoading ? null : String(k?.expiringSoonCount ?? 0)}
+          tone={(k?.expiringSoonCount ?? 0) > 0 ? 'amber' : 'gray'}
+          hint={t('dashboard.next30Days')}
+          to="/reports?tab=expiry"
         />
         <KpiCard
-          label="Orders (last 30d)"
-          value={summaryQ.isLoading ? null : String(k?.ordersLast30d ?? 0)}
-          hint={`${k?.totalOrders ?? 0} all-time`}
+          label={t('dashboard.activeSites')}
+          value={
+            summaryQ.isLoading
+              ? null
+              : t('dashboard.activeSitesValue', {
+                  active: k?.activeSites ?? 0,
+                  total: k?.totalSites ?? 0,
+                })
+          }
+          to="/sites"
+        />
+        <KpiCard
+          label={t('dashboard.activeAlerts')}
+          value={summaryQ.isLoading ? null : String(k?.activeAlerts ?? 0)}
+          tone={(k?.activeAlerts ?? 0) > 0 ? 'amber' : 'gray'}
+          hint={
+            summaryQ.isLoading
+              ? undefined
+              : t('dashboard.alertsBreakdown', {
+                  low: alerts.lowStock,
+                  expiring: alerts.expiringSoon,
+                  sync: alerts.failedSyncs,
+                  mapping: alerts.pendingMappingReviews,
+                  dupes: alerts.duplicateOnSite,
+                })
+          }
+          to="/alerts"
         />
       </div>
 
       {summaryQ.isError && (
         <Card className="p-4 text-sm text-rose-600">
-          Failed to load dashboard summary: {toApiError(summaryQ.error).message}
+          {t('dashboard.loadFailed', { message: toApiError(summaryQ.error).message })}
         </Card>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Revenue sparkline (last 30d) */}
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Revenue (last 30 days)</h2>
-            <span className="text-xs text-slate-500">{summaryQ.data ? `since ${formatDate(summaryQ.data.since)}` : ''}</span>
+            <h2 className="text-sm font-semibold text-slate-900">{t('dashboard.revenueTitle')}</h2>
+            <span className="text-xs text-slate-500">
+              {summaryQ.data ? t('dashboard.since', { date: formatDate(summaryQ.data.since) }) : ''}
+            </span>
           </div>
           <RevenueSparkline points={summaryQ.data?.revenueSeries ?? []} loading={summaryQ.isLoading} />
         </Card>
 
-        {/* Order status breakdown */}
         <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold text-slate-900">Order status (last 30d)</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-900">{t('dashboard.orderStatusTitle')}</h2>
           {summaryQ.isLoading ? (
             <Spinner className="h-5 w-5" />
           ) : (summaryQ.data?.statusBreakdown.length ?? 0) === 0 ? (
-            <p className="text-sm text-slate-500">No orders in the last 30 days.</p>
+            <p className="text-sm text-slate-500">{t('dashboard.noOrders30d')}</p>
           ) : (
             <ul className="space-y-2">
               {(summaryQ.data?.statusBreakdown ?? []).map((s) => (
                 <li key={s.status} className="flex items-center justify-between text-sm">
-                  <Badge tone={STATUS_TONE[s.status] ?? 'gray'}>{s.status}</Badge>
+                  <Badge tone={STATUS_TONE[s.status] ?? 'gray'}>
+                    {t(`orderStatus.${s.status}`, s.status)}
+                  </Badge>
                   <span className="font-medium text-slate-800">{s.count}</span>
                 </li>
               ))}
@@ -103,23 +193,22 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* Top products by qty */}
         <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold text-slate-900">Top products (by qty, last 30d)</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-900">{t('dashboard.topProductsTitle')}</h2>
           {summaryQ.isLoading ? (
             <Spinner className="h-5 w-5" />
           ) : (summaryQ.data?.topProducts.length ?? 0) === 0 ? (
-            <p className="text-sm text-slate-500">No sales recorded in the last 30 days.</p>
+            <p className="text-sm text-slate-500">{t('dashboard.noSales30d')}</p>
           ) : (
             <ol className="space-y-2 text-sm">
               {(summaryQ.data?.topProducts ?? []).map((p, i) => (
                 <li key={p.productId ?? i} className="flex items-center justify-between">
                   <span className="truncate text-slate-700">
-                    <span className="mr-2 text-slate-400">{i + 1}.</span>
-                    {p.name ?? p.skuMaster ?? 'Unknown'}
+                    <span className="me-2 text-slate-400">{i + 1}.</span>
+                    {p.name ?? p.skuMaster ?? t('common.unknown')}
                   </span>
-                  <span className="ml-3 flex shrink-0 items-center gap-2">
-                    <span className="text-slate-500">{p.quantity} sold</span>
+                  <span className="ms-3 flex shrink-0 items-center gap-2">
+                    <span className="text-slate-500">{t('dashboard.sold', { quantity: p.quantity })}</span>
                     <Badge tone="green">{formatMoneyShort(p.revenue)}</Badge>
                   </span>
                 </li>
@@ -128,29 +217,30 @@ export function Dashboard() {
           )}
         </Card>
 
-        {/* Recent orders */}
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Recent orders</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{t('dashboard.recentOrders')}</h2>
             <Link to="/orders" className="text-xs font-medium text-brand-600 hover:underline">
-              View all →
+              {t('dashboard.viewAll')}
             </Link>
           </div>
           {summaryQ.isLoading ? (
             <Spinner className="h-5 w-5" />
           ) : (summaryQ.data?.recentOrders.length ?? 0) === 0 ? (
-            <p className="text-sm text-slate-500">No orders yet. Pull orders from a site on the Sync page.</p>
+            <p className="text-sm text-slate-500">{t('dashboard.noOrdersYet')}</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {(summaryQ.data?.recentOrders ?? []).map((o) => (
                 <li key={o.id} className="flex items-center justify-between py-2 text-sm">
                   <Link to="/orders" className="truncate text-slate-700 hover:text-brand-700">
                     <span className="font-mono text-xs">#{o.orderNumber}</span>
-                    <span className="ml-2 text-slate-500">{o.siteName}</span>
+                    <span className="ms-2 text-slate-500">{o.siteName}</span>
                   </Link>
-                  <span className="ml-3 flex shrink-0 items-center gap-2">
+                  <span className="ms-3 flex shrink-0 items-center gap-2">
                     <span className="text-xs text-slate-500">{formatDate(o.dateCreated)}</span>
-                    <Badge tone={STATUS_TONE[o.status] ?? 'gray'}>{o.status}</Badge>
+                    <Badge tone={STATUS_TONE[o.status] ?? 'gray'}>
+                      {t(`orderStatus.${o.status}`, o.status)}
+                    </Badge>
                     <span className="font-medium text-slate-800">{formatMoneyShort(o.totalAmount)}</span>
                   </span>
                 </li>
@@ -160,17 +250,16 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* Low-stock products + upcoming expiries */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="p-5">
+        <Card className="p-5" id="dashboard-low-stock">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">Low-stock products</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{t('dashboard.lowStockTitle')}</h2>
             <Link to="/products?lowStock=1" className="text-xs font-medium text-brand-600 hover:underline">
-              Manage →
+              {t('dashboard.manage')}
             </Link>
           </div>
           {(summaryQ.data?.lowStockProducts.length ?? 0) === 0 ? (
-            <p className="text-sm text-slate-500">All products are above their low-stock threshold.</p>
+            <p className="text-sm text-slate-500">{t('dashboard.allStockOk')}</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {(summaryQ.data?.lowStockProducts ?? []).map((p) => (
@@ -178,9 +267,14 @@ export function Dashboard() {
                   <Link to={`/products/${p.id}`} className="truncate text-slate-700 hover:text-brand-700">
                     {p.name} <span className="text-slate-400">· {p.skuMaster}</span>
                   </Link>
-                  <span className="ml-3 flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-slate-500">{p.totalStock} / {p.lowStockThreshold}</span>
-                    <Badge tone="red">low</Badge>
+                  <span className="ms-3 flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-slate-500">
+                      {t('dashboard.stockRatio', {
+                        current: p.totalStock,
+                        threshold: p.lowStockThreshold,
+                      })}
+                    </span>
+                    <Badge tone="red">{t('common.low')}</Badge>
                   </span>
                 </li>
               ))}
@@ -188,11 +282,66 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold text-slate-900">Upcoming expiries (next 30 days)</h2>
-          <UpcomingExpiries />
+        <Card className="p-5" id="dashboard-expiry">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-900">{t('dashboard.expiryTitle')}</h2>
+            <Link to="/reports?tab=expiry" className="text-xs font-medium text-brand-600 hover:underline">
+              {t('dashboard.fullReport')}
+            </Link>
+          </div>
+          {(summaryQ.data?.expiringSoonProducts.length ?? 0) === 0 ? (
+            <p className="text-sm text-slate-500">{t('dashboard.noExpiry')}</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {(summaryQ.data?.expiringSoonProducts ?? []).map((p) => {
+                const d = daysUntil(p.expiryDate);
+                return (
+                  <li key={p.id} className="flex items-center justify-between py-2 text-sm">
+                    <Link to={`/products/${p.id}`} className="truncate text-slate-700 hover:text-brand-700">
+                      {p.name} <span className="text-slate-400">· {p.skuMaster}</span>
+                    </Link>
+                    <span className="ms-3 flex shrink-0 items-center gap-2">
+                      <span className="text-xs text-slate-500">{formatDate(p.expiryDate)}</span>
+                      {d !== null && (
+                        <Badge tone={d <= 7 ? 'red' : 'amber'}>{t('dashboard.daysLeft', { days: d })}</Badge>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
       </div>
+
+      <Card className="p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-900">{t('dashboard.latestSyncTitle')}</h2>
+          <Link to="/reports" className="text-xs font-medium text-brand-600 hover:underline">
+            {t('dashboard.syncReport')}
+          </Link>
+        </div>
+        {summaryQ.isLoading ? (
+          <Spinner className="h-5 w-5" />
+        ) : (summaryQ.data?.latestSyncs.length ?? 0) === 0 ? (
+          <p className="text-sm text-slate-500">{t('dashboard.noSyncYet')}</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {(summaryQ.data?.latestSyncs ?? []).map((s) => (
+              <li key={s.siteId} className="flex items-center justify-between py-2 text-sm">
+                <span className="text-slate-700">{s.siteName}</span>
+                <span className="ms-3 flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-slate-500">{s.syncType}</span>
+                  <span className="text-xs text-slate-400">{formatDate(s.createdAt)}</span>
+                  <Badge tone={SYNC_STATUS_TONE[s.status] ?? 'gray'}>
+                    {t(`syncStatus.${s.status}`, s.status)}
+                  </Badge>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }
@@ -202,19 +351,16 @@ function KpiCard({
   value,
   hint,
   tone = 'gray',
+  to,
 }: {
   label: string;
   value: string | null;
   hint?: string;
-  tone?: 'gray' | 'amber';
+  tone?: 'gray' | 'amber' | 'green' | 'red';
+  to?: string;
 }) {
-  return (
-    <div
-      className={
-        'card p-4 ' +
-        (tone === 'amber' ? 'border-amber-200 bg-amber-50' : '')
-      }
-    >
+  const inner = (
+    <>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <div className="mt-1 flex items-center gap-2">
         {value === null ? (
@@ -224,14 +370,36 @@ function KpiCard({
         )}
       </div>
       {hint && <p className="mt-1 text-[11px] text-slate-400">{hint}</p>}
-    </div>
+    </>
   );
+
+  const className =
+    'card block p-4 transition hover:ring-2 hover:ring-brand-200 ' +
+    (tone === 'amber'
+      ? 'border-amber-200 bg-amber-50'
+      : tone === 'green'
+        ? 'border-emerald-200 bg-emerald-50'
+        : tone === 'red'
+          ? 'border-rose-200 bg-rose-50'
+          : '');
+
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {inner}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{inner}</div>;
 }
 
 function RevenueSparkline({ points, loading }: { points: RevenueSeriesPoint[]; loading: boolean }) {
+  const { t } = useTranslation();
+
   if (loading) return <Spinner className="h-5 w-5" />;
   if (points.length === 0) {
-    return <p className="text-sm text-slate-500">No revenue recorded in the last 30 days.</p>;
+    return <p className="text-sm text-slate-500">{t('dashboard.noRevenue')}</p>;
   }
   const revenues = points.map((p) => Number(p.revenue));
   const max = Math.max(...revenues, 0);
@@ -259,44 +427,10 @@ function RevenueSparkline({ points, loading }: { points: RevenueSeriesPoint[]; l
           points={coords.join(' ')}
         />
       </svg>
-      <p className="mt-1 text-[11px] text-slate-400">{points.length} day(s) with sales</p>
+      <p className="mt-1 text-[11px] text-slate-400">
+        {t('dashboard.daysWithSales', { count: points.length })}
+      </p>
     </div>
-  );
-}
-
-function UpcomingExpiries() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['products', 'upcoming-expiry'],
-    queryFn: () => productsApi.list({ pageSize: 200 }),
-  });
-  if (isLoading) return <Spinner className="h-5 w-5" />;
-  const upcoming = (data?.data ?? [])
-    .filter((p) => {
-      const d = daysUntil(p.expiryDate);
-      return d !== null && d >= 0 && d <= 30;
-    })
-    .sort((a, b) => (daysUntil(a.expiryDate)! - daysUntil(b.expiryDate)!));
-
-  if (upcoming.length === 0) {
-    return <p className="text-sm text-slate-500">No products expiring in the next 30 days.</p>;
-  }
-  return (
-    <ul className="divide-y divide-slate-100">
-      {upcoming.slice(0, 6).map((p) => {
-        const d = daysUntil(p.expiryDate)!;
-        return (
-          <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-            <Link to={`/products/${p.id}`} className="truncate text-slate-700 hover:text-brand-700">
-              {p.name} <span className="text-slate-400">· {p.skuMaster}</span>
-            </Link>
-            <span className="ml-3 flex shrink-0 items-center gap-2">
-              <span className="text-xs text-slate-500">{formatDate(p.expiryDate)}</span>
-              <Badge tone={d <= 7 ? 'red' : 'amber'}>{d}d</Badge>
-            </span>
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 

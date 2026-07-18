@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -101,5 +102,27 @@ export class SyncController {
   @ApiOperation({ summary: 'List sync logs (paginated, optional site filter).' })
   async listLogs(@Query() q: ListSyncQuery) {
     return this.sync.listLogs({ siteId: q.siteId, page: q.page ?? 1, pageSize: q.pageSize ?? 25 });
+  }
+
+  @Delete('logs/failed')
+  @Roles('ADMIN')
+  @Audit('SYNC_LOG_CLEAR_FAILED')
+  @UseInterceptors(AuditInterceptor)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete all failed/partial sync logs (optional site filter). Clears dashboard sync alerts.',
+  })
+  async clearFailedLogs(@Query() q: ListSyncQuery) {
+    return this.sync.clearFailedLogs(q.siteId);
+  }
+
+  @Delete('logs/:id')
+  @Roles('ADMIN')
+  @Audit('SYNC_LOG_DELETE')
+  @UseInterceptors(AuditInterceptor)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a single sync log entry (admin only).' })
+  async deleteLog(@Param('id') id: string) {
+    await this.sync.deleteLog(id);
   }
 }

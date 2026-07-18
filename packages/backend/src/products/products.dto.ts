@@ -1,16 +1,40 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ProductType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
-  IsPositive,
   IsString,
+  IsUUID,
+  IsIn,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+export class ExpiryBatchInputDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @ApiProperty({ type: String, format: 'date', example: '2026-12-31' })
+  @IsString()
+  @IsNotEmpty()
+  expiryDate!: string;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  quantity?: number;
+}
 
 export class CreateProductDto {
   @ApiProperty({ example: 'SKU-0001' })
@@ -38,13 +62,40 @@ export class CreateProductDto {
 
   @ApiProperty({ example: 12.5 })
   @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
+  @Min(0)
   basePrice!: number;
 
+  @ApiPropertyOptional({ enum: ProductType, default: ProductType.SIMPLE })
+  @IsEnum(ProductType)
+  @IsOptional()
+  productType?: ProductType;
+
+  @ApiPropertyOptional({ description: 'Required when productType is VARIATION' })
+  @IsUUID()
+  @IsOptional()
+  parentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Variation attributes, e.g. { Color: "Red", Size: "L" }',
+    type: 'object',
+    additionalProperties: { type: 'string' },
+  })
+  @IsOptional()
+  @IsObject()
+  variationAttributes?: Record<string, string>;
+
+  /** @deprecated Use expiryBatches. Kept for import/backward compatibility. */
   @ApiPropertyOptional({ type: String, format: 'date-time', description: 'ISO 8601' })
   @IsOptional()
   @IsString()
   expiryDate?: string | null;
+
+  @ApiPropertyOptional({ type: [ExpiryBatchInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExpiryBatchInputDto)
+  expiryBatches?: ExpiryBatchInputDto[];
 
   @ApiPropertyOptional({ default: 0 })
   @IsInt()
@@ -91,10 +142,18 @@ export class UpdateProductDto {
   @Min(0)
   basePrice?: number;
 
+  /** @deprecated Use expiryBatches. */
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()
   @IsString()
   expiryDate?: string | null;
+
+  @ApiPropertyOptional({ type: [ExpiryBatchInputDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExpiryBatchInputDto)
+  expiryBatches?: ExpiryBatchInputDto[];
 
   @ApiPropertyOptional()
   @IsInt()
@@ -117,10 +176,28 @@ export class UpdateProductDto {
   @IsString()
   @IsOptional()
   barcode?: string | null;
+
+  @ApiPropertyOptional({ enum: ProductType })
+  @IsEnum(ProductType)
+  @IsOptional()
+  productType?: ProductType;
+
+  @ApiPropertyOptional()
+  @IsUUID()
+  @IsOptional()
+  parentId?: string | null;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+  })
+  @IsOptional()
+  @IsObject()
+  variationAttributes?: Record<string, string> | null;
 }
 
 export class ListProductsQuery {
-  @ApiPropertyOptional({ description: 'Full-text search on name or SKU' })
+  @ApiPropertyOptional({ description: 'Full-text search on name, SKU, or barcode' })
   @IsOptional()
   @IsString()
   search?: string;
@@ -135,6 +212,25 @@ export class ListProductsQuery {
   @IsBoolean()
   lowStock?: boolean;
 
+  @ApiPropertyOptional({ enum: ProductType })
+  @IsOptional()
+  @IsEnum(ProductType)
+  productType?: ProductType;
+
+  @ApiPropertyOptional({
+    enum: ['hub', 'site', 'all'],
+    default: 'hub',
+    description: 'hub = central catalog only; site = hub + site-only for siteId; all = hub + site-only from all stores',
+  })
+  @IsOptional()
+  @IsIn(['hub', 'site', 'all'])
+  view?: 'hub' | 'site' | 'all';
+
+  @ApiPropertyOptional({ description: 'Required when view=site' })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -148,4 +244,11 @@ export class ListProductsQuery {
   @IsInt()
   @Min(1)
   pageSize?: number;
+}
+
+export class LookupProductQuery {
+  @ApiProperty({ description: 'Barcode or SKU to look up' })
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
 }

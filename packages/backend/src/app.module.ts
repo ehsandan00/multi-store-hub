@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { resolve } from 'node:path';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
@@ -14,6 +15,8 @@ import { SyncModule } from './sync/sync.module';
 import { OrdersModule } from './orders/orders.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MatchingModule } from './matching/matching.module';
+import { ReportsModule } from './reports/reports.module';
+import { LogisticsOrdersModule } from './logistics-orders/logistics-orders.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envSchema } from './config/env.validation';
 
@@ -21,6 +24,10 @@ import { envSchema } from './config/env.validation';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: [
+        resolve(process.cwd(), '../../.env'),
+        resolve(process.cwd(), '.env'),
+      ],
       validate: (raw) => envSchema.parse(raw) as any,
       validationOptions: { abortEarly: false },
     }),
@@ -45,6 +52,8 @@ import { envSchema } from './config/env.validation';
     OrdersModule,
     DashboardModule,
     MatchingModule,
+    ReportsModule,
+    LogisticsOrdersModule,
   ],
   providers: [
     // JwtAuthGuard as default global guard; controllers can opt out with @Public()

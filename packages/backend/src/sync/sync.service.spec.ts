@@ -117,6 +117,25 @@ function fakePrisma() {
       },
       count: async () => logs.length,
       findMany: async () => logs.slice(),
+      findUnique: async ({ where }: any) => logs.find((l) => l.id === where.id) ?? null,
+      delete: async ({ where }: any) => {
+        const idx = logs.findIndex((l) => l.id === where.id);
+        if (idx === -1) throw new Error('not found');
+        logs.splice(idx, 1);
+        return logs[idx] ?? {};
+      },
+      deleteMany: async ({ where }: any) => {
+        const before = logs.length;
+        const statuses = where.status?.in as string[] | undefined;
+        const siteId = where.siteId as string | undefined;
+        for (let i = logs.length - 1; i >= 0; i--) {
+          const l = logs[i];
+          if (statuses && !statuses.includes(l.status)) continue;
+          if (siteId && l.siteId !== siteId) continue;
+          logs.splice(i, 1);
+        }
+        return { count: before - logs.length };
+      },
     },
     $transaction: async (arr: any) => Promise.all(arr),
     // exposed for assertions
@@ -387,5 +406,27 @@ describe('SyncService schedule config + queries', () => {
 
   it('getJob throws NotFound for an unknown id', async () => {
     await expect(svc.getJob('ghost')).rejects.toThrow(NotFoundException);
+  });
+
+  it('deleteLog removes an existing log', async () => {
+    prisma._logs.push({ id: 'sl-del', siteId: 's1', syncType: 'product_push', status: 'failed' });
+    await svc.deleteLog('sl-del');
+    expect(prisma._logs).toHaveLength(0);
+  });
+
+  it('deleteLog throws NotFound for unknown id', async () => {
+    await expect(svc.deleteLog('ghost')).rejects.toThrow(NotFoundException);
+  });
+
+  it('clearFailedLogs deletes failed and partial logs only', async () => {
+    prisma._logs.push(
+      { id: 'sl1', siteId: 's1', status: 'failed' },
+      { id: 'sl2', siteId: 's1', status: 'partial' },
+      { id: 'sl3', siteId: 's1', status: 'success' },
+      { id: 'sl4', siteId: 's2', status: 'failed' },
+    );
+    const res = await svc.clearFailedLogs('s1');
+    expect(res.deleted).toBe(2);
+    expect(prisma._logs.map((l: any) => l.id)).toEqual(['sl3', 'sl4']);
   });
 });

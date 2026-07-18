@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -113,8 +113,8 @@ describe('Sync page', () => {
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
     // Schedule sections (push + pull)
-    expect(screen.getByText('Scheduled product push')).toBeInTheDocument();
-    expect(screen.getByText('Scheduled order pull')).toBeInTheDocument();
+    expect(screen.getByText(/ارسال زمان‌بندی‌شده محصول/)).toBeInTheDocument();
+    expect(screen.getByText(/دریافت زمان‌بندی‌شده سفارش/)).toBeInTheDocument();
     // Jobs table — latest job shows pushed/failed (2 pushed)
     await waitFor(() => expect(screen.getByText('2')).toBeInTheDocument());
     // Sync log table
@@ -131,10 +131,9 @@ describe('Sync page', () => {
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
-    expect(screen.queryByRole('button', { name: /push products/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /pull orders/i })).not.toBeInTheDocument();
-    // Viewer sees both schedule states as badges (disabled).
-    expect(screen.getAllByText('disabled').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: /ارسال محصولات/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /دریافت سفارش‌ها/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/غیرفعال/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('enqueues a push on confirm and shows a success toast', async () => {
@@ -147,10 +146,9 @@ describe('Sync page', () => {
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
-    await user.click(screen.getByRole('button', { name: /push products/i }));
-    // Confirm dialog opens
-    await waitFor(() => expect(screen.getByText(/Queue push/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /Queue push/i }));
+    await user.click(screen.getByRole('button', { name: /ارسال محصولات/i }));
+    await waitFor(() => expect(screen.getByText(/افزودن به صف/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /افزودن به صف/i }));
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith('s1', { scope: 'ALL' }));
   });
 
@@ -161,7 +159,7 @@ describe('Sync page', () => {
       .mockResolvedValue({ syncEnabled: true, syncIntervalMs: 600_000, orderPullEnabled: false });
 
     renderPage();
-    await waitFor(() => expect(screen.getByText('Scheduled product push')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ارسال زمان‌بندی‌شده محصول/)).toBeInTheDocument());
     // The first checkbox is the product-push toggle (it appears before the order-pull one).
     const checkboxes = screen.getAllByRole('checkbox');
     await user.click(checkboxes[0]);
@@ -178,9 +176,31 @@ describe('Sync page', () => {
     await waitFor(() =>
       expect(screen.getAllByText('Demo IR store').length).toBeGreaterThan(0),
     );
-    await user.click(screen.getByRole('button', { name: /pull orders/i }));
-    await waitFor(() => expect(screen.getByText(/Queue pull/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /Queue pull/i }));
+    await user.click(screen.getByRole('button', { name: /دریافت سفارش‌ها/i }));
+    await waitFor(() => expect(screen.getByText(/افزودن به صف/i)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /افزودن به صف/i }));
     await waitFor(() => expect(pullSpy).toHaveBeenCalledWith('s1'));
+  });
+
+  it('shows delete controls for admins and clears failed logs', async () => {
+    const user = userEvent.setup();
+    const deleteSpy = vi.spyOn(apiModule.syncApi, 'deleteLog').mockResolvedValue(undefined);
+    const clearSpy = vi
+      .spyOn(apiModule.syncApi, 'clearFailedLogs')
+      .mockResolvedValue({ deleted: 2 });
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText('product_push')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /پاک کردن لاگ‌های ناموفق/i })).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: /^حذف$/i })[0]);
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^حذف$/i }));
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith('sl1'));
+
+    await user.click(screen.getByRole('button', { name: /پاک کردن لاگ‌های ناموفق/i }));
+    const clearDialog = await screen.findByRole('dialog');
+    await user.click(within(clearDialog).getByRole('button', { name: /^پاک کردن$/i }));
+    await waitFor(() => expect(clearSpy).toHaveBeenCalled());
   });
 });

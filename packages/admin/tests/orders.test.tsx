@@ -114,25 +114,25 @@ describe('Orders list page', () => {
     // 'Store A' appears in both the site filter dropdown and the table row.
     expect(screen.getAllByText('Store A').length).toBeGreaterThan(0);
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
-    // 'processing' appears in both the status filter dropdown and the status badge.
-    expect(screen.getAllByText('processing').length).toBeGreaterThan(0);
+    // 'در حال پردازش' appears in both the status filter dropdown and the status badge.
+    expect(screen.getAllByText('در حال پردازش').length).toBeGreaterThan(0);
     expect(screen.getByText(/49\.50/)).toBeInTheDocument();
   });
 
   it('renders the filter bar (search, site, status, date range, reset)', async () => {
     renderList();
     await waitFor(() => expect(screen.getByText('1001')).toBeInTheDocument());
-    expect(screen.getByPlaceholderText(/Order #, customer name, email/i)).toBeInTheDocument();
-    expect(screen.getByText('All sites')).toBeInTheDocument();
-    expect(screen.getByText('All statuses')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/شماره سفارش، نام، ایمیل/i)).toBeInTheDocument();
+    expect(screen.getByText('همه فروشگاه‌ها')).toBeInTheDocument();
+    expect(screen.getByText('همه وضعیت‌ها')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /بازنشانی/i })).toBeInTheDocument();
   });
 
   it('shows an empty-state message when there are no orders', async () => {
     vi.spyOn(apiModule.ordersApi, 'list').mockResolvedValue({ ...page, data: [], total: 0 });
     renderList();
     await waitFor(() =>
-      expect(screen.getByText(/No orders match these filters/i)).toBeInTheDocument(),
+      expect(screen.getByText(/سفارشی یافت نشد/i)).toBeInTheDocument(),
     );
   });
 
@@ -142,7 +142,7 @@ describe('Orders list page', () => {
     renderList();
     await waitFor(() => expect(screen.getByText('1001')).toBeInTheDocument());
     await user.click(screen.getByText('1001'));
-    await waitFor(() => expect(screen.getByText('Line items')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('اقلام')).toBeInTheDocument());
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('SKU-p1')).toBeInTheDocument();
   });

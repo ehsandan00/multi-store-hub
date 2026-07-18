@@ -55,6 +55,7 @@ export interface MatchingReport {
   rejected: number;
   aiReviewed: number;
   errors: { row: number; message: string }[];
+  orphanRows?: { siteTitle: string; siteSku?: string; siteProductId?: string }[];
   startedAt: string;
   finishedAt: string;
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../lib/auth-store';
 import { authApi, toApiError } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -7,6 +8,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Field';
 
 export function Login() {
+  const { t } = useTranslation();
   const { setSession } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -26,16 +28,18 @@ export function Login() {
     try {
       const res = await authApi.login(email.trim().toLowerCase(), password);
       setSession(res.user, res.accessToken, res.refreshToken);
-      toast.success(`Welcome back, ${res.user.email}`);
+      toast.success(t('login.welcomeBack', { email: res.user.email }));
       navigate(from, { replace: true });
     } catch (err) {
       const apiErr = toApiError(err);
       const msg =
         apiErr.statusCode === 401
-          ? 'Invalid email or password.'
+          ? t('login.invalidCredentials')
           : apiErr.statusCode === 429
-            ? 'Too many attempts. Please wait a moment and try again.'
-            : apiErr.message;
+            ? t('login.tooManyAttempts')
+            : apiErr.statusCode === 404 || apiErr.statusCode === 0
+              ? t('login.apiUnreachable')
+              : apiErr.message;
       setError(msg);
     } finally {
       setLoading(false);
@@ -50,25 +54,26 @@ export function Login() {
             <span className="text-lg font-bold">H</span>
           </div>
           <div className="leading-tight">
-            <p className="text-base font-semibold text-slate-900">Multi-Store Hub</p>
-            <p className="text-xs text-slate-500">Sign in to your admin account</p>
+            <p className="text-base font-semibold text-slate-900">{t('common.appName')}</p>
+            <p className="text-xs text-slate-500">{t('login.subtitle')}</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-4 p-6">
           <Input
             id="email"
-            label="Email"
-            type="email"
-            autoComplete="email"
+            label={t('login.email')}
+            type="text"
+            inputMode="email"
+            autoComplete="username"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@hub.local"
+            placeholder={t('login.emailPlaceholder')}
           />
           <Input
             id="password"
-            label="Password"
+            label={t('login.password')}
             type="password"
             autoComplete="current-password"
             required
@@ -78,7 +83,7 @@ export function Login() {
             placeholder="••••••••"
           />
           <Button type="submit" loading={loading} className="w-full">
-            Sign in
+            {t('login.submit')}
           </Button>
           {error && (
             <p role="alert" className="text-center text-xs text-rose-600">
@@ -89,12 +94,12 @@ export function Login() {
 
         <details className="mt-4 rounded-lg border border-slate-200 bg-white/70 p-3 text-xs text-slate-500">
           <summary className="cursor-pointer font-medium text-slate-600">
-            Seeded test accounts
+            {t('login.seededAccounts')}
           </summary>
           <ul className="mt-2 space-y-1">
-            <li>admin@hub.local / Admin@123</li>
-            <li>warehouse@hub.local / Warehouse@123</li>
-            <li>viewer@hub.local / Viewer@123</li>
+            <li>{t('login.seededAdmin')}</li>
+            <li>{t('login.seededWarehouse')}</li>
+            <li>{t('login.seededViewer')}</li>
           </ul>
         </details>
       </div>

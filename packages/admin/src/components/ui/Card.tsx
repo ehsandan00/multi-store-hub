@@ -4,9 +4,15 @@ import { cn } from '../../lib/utils';
 export function Card({
   children,
   className,
+  id,
 }: {
   children: ReactNode;
   className?: string;
+  id?: string;
 }) {
-  return <div className={cn('card', className)}>{children}</div>;
+  return (
+    <div id={id} className={cn('card', className)}>
+      {children}
+    </div>
+  );
 }

@@ -53,6 +53,22 @@ export class ImportExportController {
     res.send(buf);
   }
 
+  @Get('template.xlsx')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF', 'VIEWER')
+  @ApiOperation({
+    summary:
+      'Download an empty import template with the same sheets/columns as export. Export a filled file and re-import it later.',
+  })
+  async exportTemplate(@Res() res: Response): Promise<void> {
+    const buf = await this.service.exportTemplateBuffer();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="import-template.xlsx"');
+    res.send(buf);
+  }
+
   @Get('woo-commerce.csv')
   @Roles('ADMIN', 'WAREHOUSE_STAFF')
   @ApiOperation({

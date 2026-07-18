@@ -2,7 +2,7 @@
 
 A centralized hub for managing products, warehouse inventory, and orders across 8 independent WooCommerce stores, with a future-proof path to a full CRM.
 
-> **Status: Phase 5 (AI product matching) implemented.** Phase 6 (full reporting) remains planned.
+> **Status: Phase 6 (reporting + full dashboard KPIs) implemented.**
 
 ## Tech Stack
 
@@ -103,6 +103,17 @@ pnpm dev
 - Matching is by `sku_master`, not row position — reordering rows is safe. Round-trip (export → re-import) is lossless: the parser recognizes the exact underscore headers the export emits.
 - Unit tests pass (`pnpm test`); typecheck clean (`pnpm typecheck`).
 
+## Phase 6 Acceptance
+
+- `GET /reports/inventory` — stock levels with category / site / low-stock filters; `GET /reports/inventory.xlsx` exports Excel.
+- `GET /reports/expiry` — products expiring in a date range (default next 30 days); Excel export.
+- `GET /reports/sales` — revenue and order counts grouped by site, product, or day; Excel export.
+- `GET /reports/sync` — sync log history filterable by site, type, status, date; Excel export.
+- `GET /reports/customers` — customers with order count and total spend, sortable/filterable; Excel export.
+- Dashboard expanded: inventory units/value, today's orders/revenue, expiring-soon count, active alerts, latest sync status per site.
+- Admin panel: Reports page at `/reports` with tabbed views and Excel export.
+- Unit tests pass (`pnpm test`); typecheck clean (`pnpm typecheck`).
+
 ## Phase Roadmap
 
 | Phase | Scope                                                           | Status        |
@@ -112,7 +123,7 @@ pnpm dev
 | 3     | WooCommerce sync (hub → site), polling, idempotent              | Done          |
 | 4     | Order pull + cross-store orders + dashboard KPIs                | Done          |
 | 5     | AI product matching (fuzzball + optional Claude) + review UI    | Done          |
-| 6     | Reporting module + full dashboard KPIs                          | Planned       |
+| 6     | Reporting module + full dashboard KPIs                          | Done          |
 
 ## Security Notes
 

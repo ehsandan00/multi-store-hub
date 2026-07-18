@@ -2,6 +2,27 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+function dec(v: unknown): string {
+  if (v === null || v === undefined) return '0';
+  if (typeof v === 'object' && v !== null && 'toString' in v && typeof (v as { toString: () => string }).toString === 'function') {
+    return (v as { toString: () => string }).toString();
+  }
+  return String(v);
+}
+
+function toOrderRow(o: any) {
+  return {
+    ...o,
+    totalAmount: dec(o.totalAmount),
+    discountTotal: dec(o.discountTotal),
+    shippingTotal: dec(o.shippingTotal),
+    items: o.items?.map((it: any) => ({
+      ...it,
+      unitPrice: dec(it.unitPrice),
+    })),
+  };
+}
+
 /**
  * Read-only access to the aggregated order book (Phase 4).
  *
@@ -54,7 +75,13 @@ export class OrdersService {
         },
       }),
     ]);
-    return { data: rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return {
+      data: rows.map(toOrderRow),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async get(id: string) {
@@ -71,6 +98,6 @@ export class OrdersService {
       },
     });
     if (!order) throw new NotFoundException('Order not found');
-    return order;
+    return toOrderRow(order);
   }
 }

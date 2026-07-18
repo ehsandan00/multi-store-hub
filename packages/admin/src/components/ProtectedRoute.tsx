@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../lib/auth-store';
 import type { Role } from '../lib/types';
 import { FullPageSpinner } from './ui/Spinner';
@@ -18,6 +19,7 @@ export function markAuthBootDone() {
 }
 
 export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
+  const { t } = useTranslation();
   const { isAuthenticated, user } = useAuthStore();
   const location = useLocation();
 
@@ -30,7 +32,7 @@ export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
     return bootDone ? (
       <Navigate to="/login" replace />
     ) : (
-      <FullPageSpinner label="Loading session…" />
+      <FullPageSpinner label={t('protectedRoute.loadingSession')} />
     );
   }
 

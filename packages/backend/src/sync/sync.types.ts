@@ -33,7 +33,7 @@ export interface WcProductPayload {
   id?: number;
   sku: string;
   name: string;
-  type?: 'simple';
+  type?: 'simple' | 'variable' | 'variation';
   regular_price?: string;
   description?: string;
   short_description?: string;
@@ -92,6 +92,8 @@ export interface ResolvedPushItem {
   siteSku: string | null;
   siteProductId: string | null;
   siteSpecificTitle: string | null;
+  productType: 'SIMPLE' | 'VARIABLE' | 'VARIATION';
+  parentId: string | null;
 }
 
 // ─── Phase 4: order pull (site → hub) ───────────────────────────────────────

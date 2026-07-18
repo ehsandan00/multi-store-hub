@@ -1,4 +1,6 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, sitesApi, toApiError } from '../../lib/api';
 import { Badge } from '../../components/ui/Badge';
@@ -22,6 +24,8 @@ const STATUS_TONE: Record<string, 'gray' | 'green' | 'red' | 'amber' | 'blue'> =
 const STATUS_OPTIONS = ['', 'pending', 'processing', 'on_hold', 'completed', 'cancelled', 'refunded'];
 
 export function OrdersList() {
+  const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [siteId, setSiteId] = useState('');
   const [status, setStatus] = useState('');
@@ -30,6 +34,13 @@ export function OrdersList() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const pageSize = 25;
+
+  useEffect(() => {
+    const from = searchParams.get('dateFrom');
+    const to = searchParams.get('dateTo');
+    if (from) setDateFrom(from);
+    if (to) setDateTo(to);
+  }, [searchParams]);
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
@@ -72,18 +83,15 @@ export function OrdersList() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">Orders</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Aggregated order book across all connected stores. Pulled from WooCommerce via the Sync page.
-        </p>
+        <h1 className="text-xl font-semibold text-slate-900 sm:text-2xl">{t('orders.title')}</h1>
+        <p className="mt-1 text-sm text-slate-500">{t('orders.subtitle')}</p>
       </div>
 
-      {/* Filters */}
       <div className="card grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 lg:grid-cols-4">
         <Input
           id="orders-search"
-          label="Search"
-          placeholder="Order #, customer name, email…"
+          label={t('orders.search')}
+          placeholder={t('orders.searchPlaceholder')}
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -91,7 +99,7 @@ export function OrdersList() {
           }}
         />
         <div>
-          <label className="label">Site</label>
+          <label className="label">{t('orders.site')}</label>
           <select
             className="input"
             value={siteId}
@@ -100,7 +108,7 @@ export function OrdersList() {
               setPage(1);
             }}
           >
-            <option value="">All sites</option>
+            <option value="">{t('common.allSites')}</option>
             {(sitesQ.data?.data ?? []).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -109,7 +117,7 @@ export function OrdersList() {
           </select>
         </div>
         <div>
-          <label className="label">Status</label>
+          <label className="label">{t('orders.status')}</label>
           <select
             className="input"
             value={status}
@@ -120,7 +128,7 @@ export function OrdersList() {
           >
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
-                {s === '' ? 'All statuses' : s}
+                {s === '' ? t('common.allStatuses') : t(`orderStatus.${s}`, s)}
               </option>
             ))}
           </select>
@@ -128,7 +136,7 @@ export function OrdersList() {
         <div className="grid grid-cols-2 gap-2">
           <Input
             id="orders-date-from"
-            label="From"
+            label={t('orders.from')}
             type="date"
             value={dateFrom}
             onChange={(e) => {
@@ -138,7 +146,7 @@ export function OrdersList() {
           />
           <Input
             id="orders-date-to"
-            label="To"
+            label={t('orders.to')}
             type="date"
             value={dateTo}
             onChange={(e) => {
@@ -149,22 +157,21 @@ export function OrdersList() {
         </div>
         <div className="flex items-end justify-end gap-2 lg:col-span-4">
           <Button variant="secondary" onClick={resetFilters} type="button">
-            Reset
+            {t('common.reset')}
           </Button>
         </div>
       </div>
 
-      {/* Table */}
       <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
-              <th>Order #</th>
-              <th>Site</th>
-              <th>Customer</th>
-              <th>Status</th>
-              <th className="text-right">Total</th>
-              <th>Date</th>
+              <th>{t('orders.orderHash')}</th>
+              <th>{t('orders.site')}</th>
+              <th>{t('orders.customer')}</th>
+              <th>{t('orders.status')}</th>
+              <th className="text-end">{t('orders.total')}</th>
+              <th>{t('orders.date')}</th>
             </tr>
           </thead>
           <tbody>
@@ -178,14 +185,14 @@ export function OrdersList() {
             {listQ.isError && (
               <tr>
                 <td colSpan={6} className="py-6 text-center text-rose-600">
-                  Failed to load orders: {toApiError(listQ.error).message}
+                  {t('orders.loadFailed', { message: toApiError(listQ.error).message })}
                 </td>
               </tr>
             )}
             {listQ.data?.data.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-8 text-center text-slate-400">
-                  No orders match these filters. Pull orders from a site on the Sync page.
+                  {t('orders.empty')}
                 </td>
               </tr>
             )}
@@ -196,11 +203,14 @@ export function OrdersList() {
         </table>
       </div>
 
-      {/* Pagination */}
       {total > pageSize && (
         <div className="flex items-center justify-between text-sm">
           <p className="text-slate-500">
-            {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, total)} of {total}
+            {t('common.showingRange', {
+              from: (page - 1) * pageSize + 1,
+              to: Math.min(page * pageSize, total),
+              total,
+            })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -210,10 +220,10 @@ export function OrdersList() {
               disabled={page <= 1}
               type="button"
             >
-              Prev
+              {t('common.prev')}
             </Button>
             <span className="px-2 py-1 text-slate-600">
-              {page} / {totalPages}
+              {t('common.pageOf', { page, totalPages })}
             </span>
             <Button
               variant="secondary"
@@ -222,7 +232,7 @@ export function OrdersList() {
               disabled={page >= totalPages}
               type="button"
             >
-              Next
+              {t('common.next')}
             </Button>
           </div>
         </div>
@@ -234,16 +244,17 @@ export function OrdersList() {
 }
 
 function OrderRowItem({ order, onClick }: { order: OrderRow; onClick: () => void }) {
+  const { t } = useTranslation();
   const tone = STATUS_TONE[order.status] ?? 'gray';
   return (
     <tr className="cursor-pointer hover:bg-slate-50" onClick={onClick}>
       <td className="font-mono text-xs">{order.orderNumber}</td>
-      <td className="text-slate-700">{order.site?.name ?? '—'}</td>
-      <td className="text-slate-700">{order.billingName ?? order.customer?.name ?? '—'}</td>
+      <td className="text-slate-700">{order.site?.name ?? t('common.emDash')}</td>
+      <td className="text-slate-700">{order.billingName ?? order.customer?.name ?? t('common.emDash')}</td>
       <td>
-        <Badge tone={tone}>{order.status}</Badge>
+        <Badge tone={tone}>{t(`orderStatus.${order.status}`, order.status)}</Badge>
       </td>
-      <td className="text-right font-medium text-slate-900">
+      <td className="text-end font-medium text-slate-900">
         {formatMoney(order.totalAmount, order.currency)}
       </td>
       <td className="text-slate-500">{formatDate(order.dateCreated ?? order.createdAt)}</td>
@@ -252,6 +263,7 @@ function OrderRowItem({ order, onClick }: { order: OrderRow; onClick: () => void
 }
 
 function OrderDetailModal({ orderId, onClose }: { orderId: string | null; onClose: () => void }) {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['orders', 'detail', orderId],
     queryFn: () => ordersApi.get(orderId!),
@@ -262,13 +274,23 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string | null; onClos
     <Modal
       open={!!orderId}
       onClose={onClose}
-      title={data ? `Order #${data.orderNumber}` : 'Order'}
-      description={data ? `${data.site?.name ?? '—'} · ${data.status}` : undefined}
+      title={
+        data
+          ? t('orders.orderDetail', { orderNumber: data.orderNumber })
+          : t('orders.orderLabel')
+      }
+      description={
+        data
+          ? `${data.site?.name ?? t('common.emDash')} · ${t(`orderStatus.${data.status}`, data.status)}`
+          : undefined
+      }
       size="lg"
     >
       {isLoading && <Spinner className="h-5 w-5" />}
       {isError && (
-        <p className="text-sm text-rose-600">Failed to load order: {toApiError(error).message}</p>
+        <p className="text-sm text-rose-600">
+          {t('orders.loadOrderFailed', { message: toApiError(error).message })}
+        </p>
       )}
       {data && <OrderDetailBody order={data} />}
     </Modal>
@@ -276,55 +298,69 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string | null; onClos
 }
 
 function OrderDetailBody({ order }: { order: OrderDetail }) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-4 text-sm">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <DetailField label="Status" value={<Badge tone={STATUS_TONE[order.status] ?? 'gray'}>{order.status}</Badge>} />
-        <DetailField label="Total" value={formatMoney(order.totalAmount, order.currency)} />
-        <DetailField label="Payment method" value={order.paymentMethod ?? '—'} />
-        <DetailField label="Discount" value={formatMoney(order.discountTotal, order.currency)} />
-        <DetailField label="Shipping" value={formatMoney(order.shippingTotal, order.currency)} />
-        <DetailField label="Date created" value={formatDateTime(order.dateCreated ?? order.createdAt)} />
-        <DetailField label="Billing name" value={order.billingName ?? '—'} />
-        <DetailField label="Billing email" value={order.billingEmail ?? '—'} />
-        <DetailField label="Billing phone" value={order.billingPhone ?? '—'} />
-        <DetailField label="Customer" value={order.customer?.name ?? '—'} />
-        <DetailField label="Remote order ID" value={order.remoteOrderId ?? '—'} />
-        <DetailField label="Site" value={order.site?.name ?? '—'} />
+        <DetailField
+          label={t('orders.status')}
+          value={
+            <Badge tone={STATUS_TONE[order.status] ?? 'gray'}>
+              {t(`orderStatus.${order.status}`, order.status)}
+            </Badge>
+          }
+        />
+        <DetailField label={t('orders.total')} value={formatMoney(order.totalAmount, order.currency)} />
+        <DetailField label={t('orders.paymentMethod')} value={order.paymentMethod ?? t('common.emDash')} />
+        <DetailField label={t('orders.discount')} value={formatMoney(order.discountTotal, order.currency)} />
+        <DetailField label={t('orders.shipping')} value={formatMoney(order.shippingTotal, order.currency)} />
+        <DetailField
+          label={t('orders.dateCreated')}
+          value={formatDateTime(order.dateCreated ?? order.createdAt)}
+        />
+        <DetailField label={t('orders.billingName')} value={order.billingName ?? t('common.emDash')} />
+        <DetailField label={t('orders.billingEmail')} value={order.billingEmail ?? t('common.emDash')} />
+        <DetailField label={t('orders.billingPhone')} value={order.billingPhone ?? t('common.emDash')} />
+        <DetailField label={t('orders.customer')} value={order.customer?.name ?? t('common.emDash')} />
+        <DetailField label={t('orders.remoteOrderId')} value={order.remoteOrderId ?? t('common.emDash')} />
+        <DetailField label={t('orders.site')} value={order.site?.name ?? t('common.emDash')} />
       </div>
 
       <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Line items</h3>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {t('orders.lineItems')}
+        </h3>
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <table className="w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-3 py-2 text-left">Item</th>
-                <th className="px-3 py-2 text-left">SKU</th>
-                <th className="px-3 py-2 text-left">Linked product</th>
-                <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2 text-right">Unit price</th>
-                <th className="px-3 py-2 text-right">Line total</th>
+                <th className="px-3 py-2 text-start">{t('orders.item')}</th>
+                <th className="px-3 py-2 text-start">{t('products.sku')}</th>
+                <th className="px-3 py-2 text-start">{t('orders.linkedProduct')}</th>
+                <th className="px-3 py-2 text-end">{t('orders.qty')}</th>
+                <th className="px-3 py-2 text-end">{t('orders.unitPrice')}</th>
+                <th className="px-3 py-2 text-end">{t('orders.lineTotal')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {order.items.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-3 py-4 text-center text-slate-400">
-                    No line items recorded.
+                    {t('orders.noLineItems')}
                   </td>
                 </tr>
               )}
               {order.items.map((it) => (
                 <tr key={it.id}>
-                  <td className="px-3 py-2 text-slate-800">{it.lineName ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{it.siteSku ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-800">{it.lineName ?? t('common.emDash')}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-600">{it.siteSku ?? t('common.emDash')}</td>
                   <td className="px-3 py-2 text-slate-600">
-                    {it.product ? `${it.product.name} (${it.product.skuMaster})` : '—'}
+                    {it.product ? `${it.product.name} (${it.product.skuMaster})` : t('common.emDash')}
                   </td>
-                  <td className="px-3 py-2 text-right">{it.quantity}</td>
-                  <td className="px-3 py-2 text-right">{formatMoney(it.unitPrice, order.currency)}</td>
-                  <td className="px-3 py-2 text-right font-medium">
+                  <td className="px-3 py-2 text-end">{it.quantity}</td>
+                  <td className="px-3 py-2 text-end">{formatMoney(it.unitPrice, order.currency)}</td>
+                  <td className="px-3 py-2 text-end font-medium">
                     {formatMoney(lineTotal(it), order.currency)}
                   </td>
                 </tr>
@@ -337,7 +373,7 @@ function OrderDetailBody({ order }: { order: OrderDetail }) {
   );
 }
 
-function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
@@ -353,10 +389,14 @@ function lineTotal(item: { quantity: number; unitPrice: string }): string {
   return (qty * price).toFixed(2);
 }
 
-function formatMoney(amount: string, currency?: string | null): string {
-  const n = Number(amount);
+function formatMoney(amount: unknown, currency?: string | null): string {
+  const raw =
+    typeof amount === 'object' && amount !== null && 'toString' in amount
+      ? (amount as { toString: () => string }).toString()
+      : String(amount ?? '');
+  const n = Number(raw);
   const cur = currency && currency.length <= 3 ? currency : '';
-  if (!Number.isFinite(n)) return amount;
+  if (!Number.isFinite(n)) return raw;
   const formatted = n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return cur ? `${formatted} ${cur}` : formatted;
 }
@@ -364,8 +404,8 @@ function formatMoney(amount: string, currency?: string | null): string {
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
   }, [value, delayMs]);
   return debounced;
 }

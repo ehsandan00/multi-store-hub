@@ -11,6 +11,7 @@ function fakePrisma() {
   const products: any[] = [];
   const sites: any[] = [];
   const orders: any[] = [];
+  const logisticsOrders: any[] = [];
 
   const svc: any = {
     product: {
@@ -19,8 +20,43 @@ function fakePrisma() {
         if (where?.totalStock?.lte !== undefined) {
           return products.filter((p) => p.totalStock <= p.lowStockThreshold).length;
         }
+        if (where?.expiryDate) {
+          return products.filter((p) => {
+            if (!p.expiryDate) return false;
+            const d = new Date(p.expiryDate);
+            if (where.expiryDate.gte && d < new Date(where.expiryDate.gte)) return false;
+            if (where.expiryDate.lte && d > new Date(where.expiryDate.lte)) return false;
+            return true;
+          }).length;
+        }
         return products.length;
       },
+      findMany: async (arg?: any) => {
+        let list = products.slice();
+        const where = arg?.where;
+        if (where?.expiryDate) {
+          list = list.filter((p) => {
+            if (!p.expiryDate) return false;
+            const d = new Date(p.expiryDate);
+            if (where.expiryDate.gte && d < new Date(where.expiryDate.gte)) return false;
+            if (where.expiryDate.lte && d > new Date(where.expiryDate.lte)) return false;
+            return true;
+          });
+        }
+        return list.slice(0, arg?.take ?? list.length).map((p) => ({
+          id: p.id,
+          skuMaster: p.skuMaster,
+          name: p.name,
+          totalStock: p.totalStock,
+          expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+        }));
+      },
+    },
+    siteProductMapping: {
+      count: async () => 0,
+    },
+    syncLog: {
+      count: async () => 0,
     },
     siteConfig: {
       count: async (arg?: any) => {
@@ -53,6 +89,18 @@ function fakePrisma() {
         }));
       },
     },
+    logisticsOrder: {
+      groupBy: async () => {
+        const counts = new Map<string, number>();
+        for (const order of logisticsOrders) {
+          counts.set(order.status, (counts.get(order.status) ?? 0) + 1);
+        }
+        return Array.from(counts.entries()).map(([status, count]) => ({
+          status,
+          _count: { _all: count },
+        }));
+      },
+    },
     // Raw SQL stubs — return deterministic shapes the service consumes.
     $queryRaw: async (strings: TemplateStringsArray, ...vals: any[]) => {
       const sql = strings.join('?');
@@ -73,11 +121,20 @@ function fakePrisma() {
           .sort((a, b) => a.day.localeCompare(b.day));
       }
       if (sql.includes('COUNT(*)') && sql.includes('lowStockThreshold')) {
-        return [{ c: products.filter((p) => p.totalStock <= p.lowStockThreshold).length }];
+        return [
+          {
+            c: products.filter(
+              (p) => p.lowStockThreshold > 0 && p.totalStock <= p.lowStockThreshold,
+            ).length,
+          },
+        ];
+      }
+      if (sql.includes('HAVING COUNT(*) > 1')) {
+        return [{ c: 0 }];
       }
       if (sql.includes('lowStockThreshold') && sql.includes('LIMIT')) {
         return products
-          .filter((p) => p.totalStock <= p.lowStockThreshold)
+          .filter((p) => p.lowStockThreshold > 0 && p.totalStock <= p.lowStockThreshold)
           .sort((a, b) => a.totalStock - b.totalStock)
           .slice(0, 5)
           .map((p) => ({ id: p.id, skuMaster: p.skuMaster, name: p.name, totalStock: p.totalStock, lowStockThreshold: p.lowStockThreshold, category: p.category ?? null }));
@@ -86,12 +143,36 @@ function fakePrisma() {
         // Top products by qty.
         return [];
       }
+      if (sql.includes('SUM("totalStock")')) {
+        const units = products.reduce((a, p) => a + p.totalStock, 0);
+        return [{ units, value: '0.00' }];
+      }
+      if (sql.includes('today') || (vals.length >= 2 && sql.includes('COUNT(*)::int AS orders'))) {
+        const todayOrders = orders.filter((o) => {
+          const d = new Date(o.dateCreated);
+          const start = new Date(vals[0]);
+          const end = new Date(vals[1]);
+          return d >= start && d <= end;
+        });
+        const revenue = todayOrders.reduce((a, o) => a + Number(o.totalAmount), 0);
+        return [{ orders: todayOrders.length, revenue: revenue.toFixed(2) }];
+      }
+      if (sql.includes('DISTINCT ON')) {
+        return sites.map((s) => ({
+          siteId: s.id,
+          siteName: s.name,
+          syncType: 'test_connection',
+          status: 'success',
+          createdAt: new Date(),
+        }));
+      }
       return [];
     },
     $transaction: async (arr: any) => Promise.all(arr),
     _products: products,
     _sites: sites,
     _orders: orders,
+    _logisticsOrders: logisticsOrders,
   };
   return svc;
 }
@@ -110,6 +191,12 @@ function seed(prisma: any) {
     { id: 'o1', orderNumber: '1001', siteId: 's1', status: 'processing', totalAmount: '49.50', dateCreated: today.toISOString() },
     { id: 'o2', orderNumber: '1002', siteId: 's1', status: 'completed', totalAmount: '12.00', dateCreated: today.toISOString() },
     { id: 'o3', orderNumber: '1003', siteId: 's2', status: 'completed', totalAmount: '5.00', dateCreated: '2026-01-01T00:00:00Z' },
+  );
+  prisma._logisticsOrders.push(
+    { status: 'SENT' },
+    { status: 'SENT' },
+    { status: 'NEED_PRODUCT' },
+    { status: 'CANCELED' },
   );
 }
 
@@ -131,6 +218,9 @@ describe('DashboardService.getSummary', () => {
     expect(s.kpis.activeSites).toBe(1);
     expect(s.kpis.totalOrders).toBe(3);
     expect(s.kpis.ordersLast30d).toBe(2); // o1, o2 today; o3 in January
+    expect(s.kpis.inventoryUnits).toBeDefined();
+    expect(s.kpis.ordersToday).toBeDefined();
+    expect(s.kpis.activeAlerts).toBeDefined();
   });
 
   it('returns a revenue series for the last 30 days', async () => {
@@ -151,6 +241,15 @@ describe('DashboardService.getSummary', () => {
     // o3 (January) excluded.
     const completed = s.statusBreakdown.find((x: any) => x.status === 'completed');
     expect(completed?.count).toBe(1);
+  });
+
+  it('returns all-time logistics status counts', async () => {
+    const s = await svc.getSummary();
+    expect(s.logisticsStatusCounts).toEqual({
+      SENT: 2,
+      NEED_PRODUCT: 1,
+      CANCELED: 1,
+    });
   });
 
   it('returns low-stock products (sorted by totalStock asc, capped at 5)', async () => {

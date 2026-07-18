@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeAll } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import '../src/lib/i18n';
 
 // Polyfill matchMedia (jsdom doesn't ship it).
 beforeAll(() => {

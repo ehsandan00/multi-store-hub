@@ -6,6 +6,7 @@ import { ProtectedRoute, markAuthBootDone } from './components/ProtectedRoute';
 import { useAuthStore } from './lib/auth-store';
 import { authApi } from './lib/api';
 import { Login } from './pages/Login';
+import { AlertsPage } from './pages/Alerts';
 import { Dashboard } from './pages/Dashboard';
 import { ProductsList } from './pages/Products/List';
 import { ProductDetail } from './pages/Products/Detail';
@@ -13,8 +14,12 @@ import { SitesList } from './pages/Sites/List';
 import { ImportExportPage } from './pages/ImportExport';
 import { SyncPage } from './pages/Sync';
 import { OrdersList } from './pages/Orders/List';
+import { LogisticsPage } from './pages/Logistics/Index';
 import { MatchingPage } from './pages/Matching';
+import { ComparePage } from './pages/Compare';
+import { ReportsPage } from './pages/Reports';
 import { UsersPage } from './pages/Users';
+import { ActivityLogPage } from './pages/ActivityLog';
 import { NotFound } from './pages/NotFound';
 import { Forbidden } from './pages/Forbidden';
 
@@ -66,12 +71,22 @@ export default function App() {
           }
         >
           <Route path="/" element={<Dashboard />} />
+          <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/products" element={<ProductsList />} />
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/sites" element={<SitesList />} />
           <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/orders" element={<OrdersList />} />
+          <Route
+            path="/logistics"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'WAREHOUSE_STAFF']}>
+                <LogisticsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route
             path="/matching"
             element={
@@ -81,10 +96,26 @@ export default function App() {
             }
           />
           <Route
+            path="/compare"
+            element={
+              <ProtectedRoute roles={['ADMIN', 'WAREHOUSE_STAFF', 'VIEWER']}>
+                <ComparePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/users"
             element={
               <ProtectedRoute roles={['ADMIN']}>
                 <UsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/activity-log"
+            element={
+              <ProtectedRoute roles={['ADMIN']}>
+                <ActivityLogPage />
               </ProtectedRoute>
             }
           />

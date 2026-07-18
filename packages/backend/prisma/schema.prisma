@@ -13,6 +13,12 @@ datasource db {
 
 // ─── Enums ────────────────────────────────────────────────────────────────
 
+enum ProductType {
+  SIMPLE
+  VARIABLE
+  VARIATION
+}
+
 enum Role {
   ADMIN
   WAREHOUSE_STAFF
@@ -66,6 +72,12 @@ enum MatchingJobStatus {
   CANCELLED
 }
 
+enum LogisticsOrderStatus {
+  SENT
+  NEED_PRODUCT
+  CANCELED
+}
+
 // ─── Auth & users ─────────────────────────────────────────────────────────
 
 model User {
@@ -78,11 +90,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  inventoryLogs InventoryLog[]
-  auditLogs     AuditLog[]
-  importJobs    ImportJob[]
-  syncJobs      SyncJob[]
-  matchingJobs  MatchingJob[]
+  inventoryLogs           InventoryLog[]
+  auditLogs               AuditLog[]
+  importJobs              ImportJob[]
+  syncJobs                SyncJob[]
+  matchingJobs            MatchingJob[]
+  logisticsOrders         LogisticsOrder[] @relation("LogisticsOrderCreator")
+  assignedLogisticsOrders LogisticsOrder[] @relation("LogisticsOrderEmployee")
 
   @@index([role])
 }
@@ -106,27 +120,55 @@ model AuditLog {
 // ─── Products & inventory ─────────────────────────────────────────────────
 
 model Product {
-  id                String    @id @default(uuid())
-  skuMaster         String    @unique
-  name              String
-  description       String?
-  category          String?
-  basePrice         Decimal   @db.Decimal(12, 2)
-  expiryDate        DateTime?
-  totalStock        Int       @default(0)
-  lowStockThreshold Int       @default(0)
-  imageUrl          String?
-  barcode           String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                  String      @id @default(uuid())
+  skuMaster           String      @unique
+  name                String
+  description         String?
+  category            String?
+  basePrice           Decimal     @db.Decimal(12, 2)
+  expiryDate          DateTime?
+  totalStock          Int         @default(0)
+  lowStockThreshold   Int         @default(0)
+  imageUrl            String?
+  /// Hub-only product photo for warehouse identification; never synced to stores.
+  hubPhotoPath        String?
+  barcode             String?
+  productType         ProductType @default(SIMPLE)
+  /// Parent hub product when this row is a variation (productType=VARIATION).
+  parentId            String?
+  /// Attribute map for variations, e.g. {"Color":"Red","Size":"L"}.
+  variationAttributes Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
-  siteMappings  SiteProductMapping[]
-  inventoryLogs InventoryLog[]
-  orderItems    OrderItem[]
+  parent              Product?             @relation("ProductVariations", fields: [parentId], references: [id], onDelete: SetNull)
+  variations          Product[]            @relation("ProductVariations")
+  siteMappings        SiteProductMapping[]
+  inventoryLogs       InventoryLog[]
+  orderItems          OrderItem[]
+  logisticsOrderItems LogisticsOrderItem[]
+  expiryBatches       ProductExpiryBatch[]
 
   @@index([category])
   @@index([expiryDate])
   @@index([name])
+  @@index([barcode])
+  @@index([parentId])
+  @@index([productType])
+}
+
+model ProductExpiryBatch {
+  id         String   @id @default(uuid())
+  productId  String
+  expiryDate DateTime
+  quantity   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([expiryDate])
 }
 
 model InventoryLog {
@@ -294,6 +336,48 @@ model OrderItem {
   @@index([siteSku])
 }
 
+// ─── Manual logistics orders ───────────────────────────────────────────────
+
+model LogisticsOrder {
+  id              String               @id @default(uuid())
+  orderNumber     String               @unique
+  receiverName    String
+  phone           String
+  city            String
+  status          LogisticsOrderStatus
+  createdByUserId String?
+  employeeId      String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  createdBy User?                @relation("LogisticsOrderCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  employee  User?                @relation("LogisticsOrderEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  items     LogisticsOrderItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([receiverName])
+  @@index([phone])
+  @@index([city])
+  @@index([createdByUserId])
+  @@index([employeeId])
+}
+
+model LogisticsOrderItem {
+  id               String @id @default(uuid())
+  logisticsOrderId String
+  productId        String
+  quantity         Int
+  productName      String
+  skuMaster        String
+
+  logisticsOrder LogisticsOrder @relation(fields: [logisticsOrderId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([logisticsOrderId])
+  @@index([productId])
+}
+
 // ─── Import jobs (Phase 2: Excel import/export) ────────────────────────────
 
 model ImportJob {
@@ -315,6 +399,8 @@ model ImportJob {
   // - report: final summary after commit
   errors          Json?
   rows            Json?
+  /// SiteMapping sheet rows pending commit (cleared after commit).
+  mappingRows     Json?
   report          Json?
   createdByUserId String?
   createdAt       DateTime        @default(now())
@@ -358,28 +444,28 @@ model MatchingJob {
 // ─── Sync jobs (Phase 3: WooCommerce sync, hub → site) ──────────────────────
 
 model SyncJob {
-  id          String         @id @default(uuid())
-  siteId      String
-  direction   SyncDirection  @default(PUSH)
-  status      SyncJobStatus  @default(QUEUED)
+  id              String        @id @default(uuid())
+  siteId          String
+  direction       SyncDirection @default(PUSH)
+  status          SyncJobStatus @default(QUEUED)
   // What to sync: 'ALL' pushes every hub product to the site; 'MAPPING' pushes
   // only products with a SiteProductMapping; 'PRODUCT_IDS' pushes a specific
   // set (carried in payload.productIds).
-  scope       String         @default("ALL")
-  totalItems  Int            @default(0)
-  pushedCount Int            @default(0)
-  failedCount Int            @default(0)
+  scope           String        @default("ALL")
+  totalItems      Int           @default(0)
+  pushedCount     Int           @default(0)
+  failedCount     Int           @default(0)
   // Structured payload:
   // - errors: [{ sku, message, code? }]
   // - productIds: string[] (only when scope=PRODUCT_IDS)
   // - report: final summary
-  errors      Json?
-  payload     Json?
-  report      Json?
+  errors          Json?
+  payload         Json?
+  report          Json?
   createdByUserId String?
-  createdAt   DateTime       @default(now())
-  startedAt   DateTime?
-  finishedAt  DateTime?
+  createdAt       DateTime      @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
 
   site SiteConfig @relation(fields: [siteId], references: [id], onDelete: Cascade)
   user User?      @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)

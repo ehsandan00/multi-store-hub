@@ -187,6 +187,15 @@ export class MatchingService {
     const reviewCount = active.filter((s) => s.tier === 'review').length;
     const rejectedCount = rows.length - active.length;
 
+    const matchedRows = new Set(active.map((s) => s.row));
+    const orphanRows = rows
+      .filter((r) => !matchedRows.has(r.row))
+      .map((r) => ({
+        siteTitle: r.siteTitle,
+        siteSku: r.siteSku,
+        siteProductId: r.siteProductId,
+      }));
+
     const startedAt = new Date();
     const finishedAt = new Date();
     const report: MatchingReport = {
@@ -195,6 +204,7 @@ export class MatchingService {
       rejected: rejectedCount,
       aiReviewed: aiReviewCount,
       errors,
+      orphanRows,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
     };
@@ -252,6 +262,252 @@ export class MatchingService {
       this.prisma.siteProductMapping.count({ where }),
     ]);
     return { data, total, page, pageSize };
+  }
+
+  // ─── Coverage gaps & duplicates ───────────────────────────────────────────
+
+  async getCoverageGaps(q: { siteId?: string; page: number; pageSize: number }) {
+    const pageSize = Math.min(Math.max(q.pageSize, 1), 100);
+    const page = Math.max(q.page, 1);
+    const sites = await this.prisma.siteConfig.findMany({
+      where: { isActive: true, ...(q.siteId ? { id: q.siteId } : {}) },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    if (!sites.length) {
+      return {
+        hubNotOnSite: { data: [], total: 0, page, pageSize },
+        siteNotInHub: { data: [], total: 0, page, pageSize },
+        summary: { hubNotOnSiteTotal: 0, siteNotInHubTotal: 0 },
+      };
+    }
+
+    const hubNotOnSiteAll: {
+      productId: string;
+      skuMaster: string;
+      name: string;
+      siteId: string;
+      siteName: string;
+      reason: 'NO_MAPPING' | 'NOT_SYNCED' | 'PENDING_REVIEW';
+    }[] = [];
+
+    for (const site of sites) {
+      const products = await this.prisma.product.findMany({
+        select: {
+          id: true,
+          skuMaster: true,
+          name: true,
+          siteMappings: {
+            where: { siteId: site.id },
+            select: { matchStatus: true, siteProductId: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+      for (const p of products) {
+        const mapping = p.siteMappings[0];
+        if (!mapping) {
+          hubNotOnSiteAll.push({
+            productId: p.id,
+            skuMaster: p.skuMaster,
+            name: p.name,
+            siteId: site.id,
+            siteName: site.name,
+            reason: 'NO_MAPPING',
+          });
+        } else if (mapping.matchStatus === MatchStatus.PENDING_REVIEW) {
+          hubNotOnSiteAll.push({
+            productId: p.id,
+            skuMaster: p.skuMaster,
+            name: p.name,
+            siteId: site.id,
+            siteName: site.name,
+            reason: 'PENDING_REVIEW',
+          });
+        } else if (!mapping.siteProductId) {
+          hubNotOnSiteAll.push({
+            productId: p.id,
+            skuMaster: p.skuMaster,
+            name: p.name,
+            siteId: site.id,
+            siteName: site.name,
+            reason: 'NOT_SYNCED',
+          });
+        }
+      }
+    }
+
+    const siteNotInHubAll = await this.collectSiteNotInHub(q.siteId);
+
+    const hubSkip = (page - 1) * pageSize;
+    const siteSkip = (page - 1) * pageSize;
+
+    return {
+      hubNotOnSite: {
+        data: hubNotOnSiteAll.slice(hubSkip, hubSkip + pageSize),
+        total: hubNotOnSiteAll.length,
+        page,
+        pageSize,
+      },
+      siteNotInHub: {
+        data: siteNotInHubAll.slice(siteSkip, siteSkip + pageSize),
+        total: siteNotInHubAll.length,
+        page,
+        pageSize,
+      },
+      summary: {
+        hubNotOnSiteTotal: hubNotOnSiteAll.length,
+        siteNotInHubTotal: siteNotInHubAll.length,
+      },
+    };
+  }
+
+  private async collectSiteNotInHub(siteId?: string) {
+    const rows: {
+      siteId: string;
+      siteName: string;
+      siteSku: string | null;
+      siteTitle: string;
+      siteProductId: string | null;
+      source: 'ORDER' | 'UPLOAD';
+      orderCount?: number;
+    }[] = [];
+    const seen = new Set<string>();
+
+    const orderOrphans = await this.prisma.orderItem.groupBy({
+      by: ['siteSku', 'lineName'],
+      where: {
+        productId: null,
+        siteSku: { not: null },
+        order: siteId ? { siteId } : undefined,
+      },
+      _count: { _all: true },
+    });
+
+    for (const g of orderOrphans) {
+      const orders = await this.prisma.orderItem.findFirst({
+        where: { productId: null, siteSku: g.siteSku, lineName: g.lineName },
+        select: { order: { select: { siteId: true, site: { select: { name: true } } } } },
+      });
+      if (!orders) continue;
+      const sid = orders.order.siteId;
+      const key = `${sid}:${g.siteSku}:${g.lineName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        siteId: sid,
+        siteName: orders.order.site.name,
+        siteSku: g.siteSku,
+        siteTitle: g.lineName ?? g.siteSku ?? '—',
+        siteProductId: null,
+        source: 'ORDER',
+        orderCount: g._count._all,
+      });
+    }
+
+    const jobs = await this.prisma.matchingJob.findMany({
+      where: { siteId, status: 'COMPLETED', report: { not: Prisma.DbNull } },
+      orderBy: { finishedAt: 'desc' },
+      take: siteId ? 5 : 20,
+      include: { site: { select: { name: true } } },
+    });
+
+    const latestJobBySite = new Map<string, (typeof jobs)[0]>();
+    for (const job of jobs) {
+      if (!latestJobBySite.has(job.siteId)) latestJobBySite.set(job.siteId, job);
+    }
+
+    for (const job of latestJobBySite.values()) {
+      const report = job.report as MatchingReport | null;
+      for (const orphan of report?.orphanRows ?? []) {
+        const sku = orphan.siteSku ?? null;
+        const key = `${job.siteId}:${sku ?? ''}:${orphan.siteTitle}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          siteId: job.siteId,
+          siteName: job.site.name,
+          siteSku: sku,
+          siteTitle: orphan.siteTitle,
+          siteProductId: orphan.siteProductId ?? null,
+          source: 'UPLOAD',
+        });
+      }
+    }
+
+    return rows.sort((a, b) => a.siteName.localeCompare(b.siteName) || a.siteTitle.localeCompare(b.siteTitle));
+  }
+
+  async getDuplicateWarnings() {
+    const [skuDupes, idDupes, hubBarcodeDupes] = await Promise.all([
+      this.prisma.$queryRaw<
+        { siteId: string; siteName: string; siteSku: string; count: number; productIds: string }[]
+      >`
+        SELECT
+          m."siteId",
+          s.name AS "siteName",
+          m."siteSku",
+          COUNT(*)::int AS count,
+          string_agg(m."productId", ',') AS "productIds"
+        FROM "SiteProductMapping" m
+        JOIN "SiteConfig" s ON s.id = m."siteId"
+        WHERE m."siteSku" IS NOT NULL AND m."siteSku" <> ''
+        GROUP BY m."siteId", s.name, m."siteSku"
+        HAVING COUNT(*) > 1
+        ORDER BY count DESC
+      `,
+      this.prisma.$queryRaw<
+        { siteId: string; siteName: string; siteProductId: string; count: number; productIds: string }[]
+      >`
+        SELECT
+          m."siteId",
+          s.name AS "siteName",
+          m."siteProductId",
+          COUNT(*)::int AS count,
+          string_agg(m."productId", ',') AS "productIds"
+        FROM "SiteProductMapping" m
+        JOIN "SiteConfig" s ON s.id = m."siteId"
+        WHERE m."siteProductId" IS NOT NULL AND m."siteProductId" <> ''
+        GROUP BY m."siteId", s.name, m."siteProductId"
+        HAVING COUNT(*) > 1
+        ORDER BY count DESC
+      `,
+      this.prisma.$queryRaw<{ barcode: string; count: number; skus: string }[]>`
+        SELECT
+          barcode,
+          COUNT(*)::int AS count,
+          string_agg("skuMaster", ',') AS skus
+        FROM "Product"
+        WHERE barcode IS NOT NULL AND barcode <> ''
+        GROUP BY barcode
+        HAVING COUNT(*) > 1
+        ORDER BY count DESC
+      `,
+    ]);
+
+    return {
+      siteSkuDuplicates: skuDupes.map((r) => ({
+        siteId: r.siteId,
+        siteName: r.siteName,
+        siteSku: r.siteSku,
+        count: Number(r.count),
+        productIds: r.productIds.split(','),
+      })),
+      siteProductIdDuplicates: idDupes.map((r) => ({
+        siteId: r.siteId,
+        siteName: r.siteName,
+        siteProductId: r.siteProductId,
+        count: Number(r.count),
+        productIds: r.productIds.split(','),
+      })),
+      hubBarcodeDuplicates: hubBarcodeDupes.map((r) => ({
+        barcode: r.barcode,
+        count: Number(r.count),
+        skus: r.skus.split(','),
+      })),
+      total:
+        skuDupes.length + idDupes.length + hubBarcodeDupes.length,
+    };
   }
 
   async approve(mappingId: string): Promise<void> {
@@ -447,6 +703,122 @@ export class MatchingService {
       aiReviewCount: result.aiReviewCount,
       errors: result.errors,
       suggestions: result.suggestions,
+    };
+  }
+
+  /** Site-only rows from matching/order orphans (view=site|all). */
+  async listSiteOrphans(siteId?: string) {
+    return this.collectSiteNotInHub(siteId);
+  }
+
+  /** Side-by-side hub vs site product comparison for one store. */
+  async getProductComparison(q: {
+    siteId: string;
+    page: number;
+    pageSize: number;
+    filter?: 'all' | 'linked' | 'hub_only' | 'site_only' | 'pending';
+  }) {
+    const pageSize = Math.min(Math.max(q.pageSize, 1), 100);
+    const page = Math.max(q.page, 1);
+    const site = await this.prisma.siteConfig.findUnique({
+      where: { id: q.siteId },
+      select: { id: true, name: true },
+    });
+    if (!site) throw new NotFoundException('Site not found');
+
+    const products = await this.prisma.product.findMany({
+      include: {
+        siteMappings: { where: { siteId: q.siteId }, take: 1 },
+        parent: { select: { skuMaster: true } },
+      },
+      orderBy: { skuMaster: 'asc' },
+    });
+
+    type Row = {
+      kind: 'HUB' | 'SITE_ONLY';
+      linkStatus: 'LINKED' | 'NO_MAPPING' | 'PENDING' | 'NOT_SYNCED' | 'SITE_ONLY';
+      productId?: string;
+      hubSku?: string;
+      hubName?: string;
+      hubPrice?: string;
+      hubStock?: number;
+      productType?: string;
+      parentSku?: string | null;
+      siteSku?: string | null;
+      siteTitle?: string | null;
+      siteProductId?: string | null;
+      matchStatus?: string | null;
+      lastSyncedAt?: string | null;
+      source?: string;
+    };
+
+    const hubRows: Row[] = products.map((p) => {
+      const m = p.siteMappings[0];
+      let linkStatus: Row['linkStatus'] = 'NO_MAPPING';
+      if (m) {
+        if (m.matchStatus === MatchStatus.PENDING_REVIEW) linkStatus = 'PENDING';
+        else if (!m.siteProductId) linkStatus = 'NOT_SYNCED';
+        else linkStatus = 'LINKED';
+      }
+      return {
+        kind: 'HUB',
+        linkStatus,
+        productId: p.id,
+        hubSku: p.skuMaster,
+        hubName: p.name,
+        hubPrice: p.basePrice.toString(),
+        hubStock: p.totalStock,
+        productType: (p as { productType?: string }).productType ?? 'SIMPLE',
+        parentSku: (p.parent as { skuMaster?: string } | null)?.skuMaster ?? null,
+        siteSku: m?.siteSku ?? null,
+        siteTitle: m?.siteSpecificTitle ?? null,
+        siteProductId: m?.siteProductId ?? null,
+        matchStatus: m?.matchStatus ?? null,
+        lastSyncedAt: m?.lastSyncedAt?.toISOString() ?? null,
+      };
+    });
+
+    const orphans = await this.collectSiteNotInHub(q.siteId);
+    const siteRows: Row[] = orphans.map((o) => ({
+      kind: 'SITE_ONLY',
+      linkStatus: 'SITE_ONLY',
+      siteSku: o.siteSku,
+      siteTitle: o.siteTitle,
+      siteProductId: o.siteProductId,
+      source: o.source,
+    }));
+
+    let all: Row[] = [...hubRows, ...siteRows];
+    switch (q.filter) {
+      case 'linked':
+        all = hubRows.filter((r) => r.linkStatus === 'LINKED');
+        break;
+      case 'hub_only':
+        all = hubRows.filter((r) => r.linkStatus === 'NO_MAPPING' || r.linkStatus === 'NOT_SYNCED');
+        break;
+      case 'site_only':
+        all = siteRows;
+        break;
+      case 'pending':
+        all = hubRows.filter((r) => r.linkStatus === 'PENDING');
+        break;
+      default:
+        break;
+    }
+
+    const skip = (page - 1) * pageSize;
+    return {
+      site,
+      data: all.slice(skip, skip + pageSize),
+      total: all.length,
+      page,
+      pageSize,
+      summary: {
+        hubTotal: products.length,
+        linked: hubRows.filter((r) => r.linkStatus === 'LINKED').length,
+        hubOnly: hubRows.filter((r) => r.linkStatus !== 'LINKED').length,
+        siteOnly: siteRows.length,
+      },
     };
   }
 }

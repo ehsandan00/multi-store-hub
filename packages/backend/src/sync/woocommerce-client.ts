@@ -145,7 +145,7 @@ export class WooCommerceClient {
     const qs = new URLSearchParams();
     qs.set('per_page', String(perPage));
     qs.set('page', String(page));
-    qs.set('orderby', 'date_modified');
+    qs.set('orderby', 'modified');
     qs.set('order', 'asc');
     if (params.modifiedAfter) {
       qs.set('modified_after', params.modifiedAfter.toISOString());
