@@ -207,7 +207,8 @@ describe('DashboardService.getSummary', () => {
   beforeEach(() => {
     prisma = fakePrisma();
     seed(prisma);
-    svc = new DashboardService(prisma);
+    const customers = { countCrossSiteDuplicateGroups: jest.fn(async () => 0) };
+    svc = new DashboardService(prisma, customers as any);
   });
 
   it('returns KPIs (totalProducts, lowStockCount, sites, orders)', async () => {

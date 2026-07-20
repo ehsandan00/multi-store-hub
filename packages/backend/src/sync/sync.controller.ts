@@ -15,6 +15,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SyncService } from './sync.service';
 import { OrderPullService } from './order-pull.service';
+import { CustomerPullService } from './customer-pull.service';
 import { ImportAspNetMappingsDto, ListSyncQuery, PushSyncDto, UpdateScheduleDto } from './sync.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Audit } from '../common/decorators/audit.decorator';
@@ -28,6 +29,7 @@ export class SyncController {
   constructor(
     private readonly sync: SyncService,
     private readonly orderPull: OrderPullService,
+    private readonly customerPull: CustomerPullService,
   ) {}
 
   // ─── Push ─────────────────────────────────────────────────────────────────
@@ -85,6 +87,19 @@ export class SyncController {
   @HttpCode(HttpStatus.ACCEPTED)
   async pull(@Param('siteId') siteId: string, @Req() req: { user: AuthenticatedUser }) {
     return this.orderPull.enqueuePull(siteId, req.user);
+  }
+
+  @Post('sites/:siteId/pull-customers')
+  @Roles('ADMIN', 'WAREHOUSE_STAFF')
+  @Audit('CUSTOMER_PULL')
+  @UseInterceptors(AuditInterceptor)
+  @ApiOperation({
+    summary:
+      'Enqueue a site→hub customer pull (BullMQ). WooCommerce only. Incremental via lastCustomerPullAt.',
+  })
+  @HttpCode(HttpStatus.ACCEPTED)
+  async pullCustomers(@Param('siteId') siteId: string, @Req() req: { user: AuthenticatedUser }) {
+    return this.customerPull.enqueuePull(siteId, req.user);
   }
 
   // ─── Schedule config ──────────────────────────────────────────────────────

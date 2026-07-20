@@ -150,6 +150,7 @@ export function Dashboard() {
                   sync: alerts.failedSyncs,
                   mapping: alerts.pendingMappingReviews,
                   dupes: alerts.duplicateOnSite,
+                  crossSite: alerts.crossSiteDuplicates,
                 })
           }
           to="/alerts"

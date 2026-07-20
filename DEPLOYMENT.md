@@ -163,6 +163,8 @@ nano .env
 ```env
 NODE_ENV=production
 PORT=3001
+# Comma-separated list of every URL you open the admin from (exact scheme + host, no trailing slash).
+# Example with multiple domains: http://kamandhub.ir,https://kamandhub.ir,http://185.164.72.108
 CORS_ORIGIN=https://hub.example.com
 
 DATABASE_URL=postgresql://hub:STRONG_DB_PASSWORD@localhost:5432/multi_store_hub?schema=public
@@ -368,7 +370,7 @@ sudo systemctl reload nginx
 
 | Problem | Likely fix |
 | ------- | ---------- |
-| Login 401 / CORS error | `CORS_ORIGIN` must match browser URL exactly (https, no trailing slash) |
+| Login 401 / CORS error | Add **every** admin URL to `CORS_ORIGIN` (comma-separated, exact scheme/host, no trailing slash). Missing origin causes login to fail. After editing `.env`, run `cp .env packages/backend/.env && pm2 restart msh-api --update-env`. |
 | Import/sync stuck | Check `REDIS_URL`, `docker compose ps`, `pm2 logs` |
 | WC test-connection fails | Wrong `network_route` or proxy; site blocks VPS IP |
 | Admin loads, API 404 | nginx rewrite `/api/` → backend; rebuild admin with `VITE_API_URL=/api` |

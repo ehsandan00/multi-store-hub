@@ -60,6 +60,30 @@ function fakePrisma() {
         orders.set(where.id, merged);
         return merged;
       },
+      groupBy: async ({ by, where }: any) => {
+        let rows = Array.from(orders.values());
+        if (where?.siteId) rows = rows.filter((o: any) => o.siteId === where.siteId);
+        if (where?.customerId?.not === null) rows = rows.filter((o: any) => o.customerId);
+        if (where?.customerId && typeof where.customerId === 'string') {
+          rows = rows.filter((o: any) => o.customerId === where.customerId);
+        }
+        const map = new Map<string, { _count: { _all: number }; _sum: { totalAmount: any } }>();
+        for (const o of rows) {
+          const key = by.map((f: string) => o[f]).join('|');
+          const cur = map.get(key) ?? { _count: { _all: 0 }, _sum: { totalAmount: new Prisma.Decimal(0) } };
+          cur._count._all += 1;
+          cur._sum.totalAmount = new Prisma.Decimal(cur._sum.totalAmount).add(o.totalAmount ?? 0);
+          map.set(key, cur);
+        }
+        return Array.from(map.entries()).map(([key, agg]) => {
+          const parts = key.split('|');
+          const row: any = { ...agg };
+          by.forEach((f: string, i: number) => {
+            row[f] = parts[i];
+          });
+          return row;
+        });
+      },
     },
     orderItem: {
       deleteMany: async ({ where }: any) => {
@@ -107,6 +131,12 @@ function fakePrisma() {
         const merged = { ...existing, ...data };
         customers.set(where.id, merged);
         return merged;
+      },
+      findMany: async ({ where }: any) => {
+        let rows = Array.from(customers.values());
+        if (where?.siteId) rows = rows.filter((c: any) => c.siteId === where.siteId);
+        if (where?.id) rows = rows.filter((c: any) => c.id === where.id);
+        return rows.map((c) => ({ id: c.id }));
       },
     },
     siteConfig: {

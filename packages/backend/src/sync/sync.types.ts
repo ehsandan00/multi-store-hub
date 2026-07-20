@@ -162,3 +162,38 @@ export interface OrderPullReport {
 
 /** Default WC orders page size (WC max is 100). */
 export const WC_ORDERS_PAGE_SIZE = 100;
+
+/** Default WC customers page size (WC max is 100). */
+export const WC_CUSTOMERS_PAGE_SIZE = 100;
+
+/** WooCommerce REST v3 customer (subset we persist). */
+export interface WcCustomerRemote {
+  id: number;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  billing?: WcBillingRemote;
+  date_created?: string;
+  date_modified?: string;
+}
+
+/** Per-customer error recorded during a customer pull. */
+export interface CustomerPullItemError {
+  remoteCustomerId: number;
+  message: string;
+  code?: string;
+  statusCode?: number;
+}
+
+/** Final report for a customer-pull sync job. */
+export interface CustomerPullReport {
+  pulled: number;
+  created: number;
+  updated: number;
+  failed: number;
+  errors: CustomerPullItemError[];
+  startedAt: string;
+  finishedAt: string;
+  routeUsed: string;
+  newestDateModified: string | null;
+}

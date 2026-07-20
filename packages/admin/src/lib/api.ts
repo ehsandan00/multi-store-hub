@@ -57,6 +57,10 @@ import type {
   SyncReportRow,
   CustomersReportQuery,
   CustomerReportRow,
+  ListCustomersQuery,
+  PaginatedCustomers,
+  CrossSiteDuplicatesResult,
+  EnqueueCustomerPullResult,
 } from './types';
 import { useAuthStore } from './auth-store';
 
@@ -339,6 +343,9 @@ export const syncApi = {
   pull: (siteId: string) =>
     api.post<EnqueuePullResult>(`/sync/sites/${siteId}/pull`).then((r) => r.data),
 
+  pullCustomers: (siteId: string) =>
+    api.post<EnqueueCustomerPullResult>(`/sync/sites/${siteId}/pull-customers`).then((r) => r.data),
+
   updateSchedule: (siteId: string, payload: UpdateSchedulePayload) =>
     api.patch<UpdateScheduleResult>(`/sync/sites/${siteId}/schedule`, payload).then((r) => r.data),
 
@@ -364,6 +371,13 @@ export const ordersApi = {
   list: (q: ListOrdersQuery = {}) =>
     api.get<PaginatedOrders>('/orders', { params: q }).then((r) => r.data),
   get: (id: string) => api.get<OrderDetail>(`/orders/${id}`).then((r) => r.data),
+};
+
+export const customersApi = {
+  list: (q: ListCustomersQuery) =>
+    api.get<PaginatedCustomers>('/customers', { params: q }).then((r) => r.data),
+  crossSiteDuplicates: () =>
+    api.get<CrossSiteDuplicatesResult>('/customers/cross-site-duplicates').then((r) => r.data),
 };
 
 export const logisticsOrdersApi = {

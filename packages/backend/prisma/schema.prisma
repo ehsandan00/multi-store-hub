@@ -216,6 +216,8 @@ model SiteConfig {
   // than syncIntervalMs. Manual pulls bypass these.
   orderPullEnabled        Boolean      @default(false)
   lastOrderPullAt         DateTime?
+  // Customer pull from WooCommerce REST (site → hub).
+  lastCustomerPullAt      DateTime?
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
 

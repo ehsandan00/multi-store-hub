@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { SyncService } from './sync.service';
 import { OrderPullService } from './order-pull.service';
+import { CustomerPullService } from './customer-pull.service';
 import { SyncScheduler } from './sync.scheduler';
 import { SYNC_QUEUE_NAME } from './sync.types';
 
@@ -23,6 +24,7 @@ export class SyncProcessor extends WorkerHost {
   constructor(
     private readonly sync: SyncService,
     private readonly orderPull: OrderPullService,
+    private readonly customerPull: CustomerPullService,
     private readonly scheduler: SyncScheduler,
   ) {
     super();
@@ -40,6 +42,15 @@ export class SyncProcessor extends WorkerHost {
       const report = await this.orderPull.runPull(syncJobId);
       this.logger.log(
         `Order pull job ${syncJobId} done: pulled=${report.pulled} created=${report.created} updated=${report.updated} failed=${report.failed}`,
+      );
+      return report;
+    }
+
+    if (job.name === 'pull-customers') {
+      this.logger.log(`Processing customer pull job ${syncJobId} (bullmq id=${job.id})`);
+      const report = await this.customerPull.runPull(syncJobId);
+      this.logger.log(
+        `Customer pull job ${syncJobId} done: pulled=${report.pulled} created=${report.created} updated=${report.updated} failed=${report.failed}`,
       );
       return report;
     }

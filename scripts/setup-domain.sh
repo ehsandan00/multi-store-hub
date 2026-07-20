@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 DOMAIN=kamandhub.work.gd
+EXTRA_DOMAINS="${EXTRA_DOMAINS:-kamandhub.ir www.kamandhub.ir}"
 APP_DIR=/opt/multi-store-hub
 
 cat > /etc/nginx/sites-available/multi-store-hub <<NGINX
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name ${DOMAIN} 185.164.72.108 _;
+    server_name ${DOMAIN} ${EXTRA_DOMAINS} 185.164.72.108 _;
 
     root ${APP_DIR}/packages/admin/dist;
     index index.html;
@@ -33,11 +34,15 @@ ln -sf /etc/nginx/sites-available/multi-store-hub /etc/nginx/sites-enabled/multi
 nginx -t
 systemctl reload nginx
 
-# Update CORS for domain (HTTP first; HTTPS added after certbot)
+# Update CORS — every browser origin must be listed (exact scheme/host, no trailing slash).
+CORS_LIST="http://${DOMAIN},https://${DOMAIN},http://185.164.72.108"
+for d in ${EXTRA_DOMAINS}; do
+  CORS_LIST="${CORS_LIST},http://${d},https://${d}"
+done
 if grep -q '^CORS_ORIGIN=' "$APP_DIR/.env"; then
-  sed -i "s|^CORS_ORIGIN=.*|CORS_ORIGIN=http://${DOMAIN},http://185.164.72.108|" "$APP_DIR/.env"
+  sed -i "s|^CORS_ORIGIN=.*|CORS_ORIGIN=${CORS_LIST}|" "$APP_DIR/.env"
 else
-  echo "CORS_ORIGIN=http://${DOMAIN},http://185.164.72.108" >> "$APP_DIR/.env"
+  echo "CORS_ORIGIN=${CORS_LIST}" >> "$APP_DIR/.env"
 fi
 cp "$APP_DIR/.env" "$APP_DIR/packages/backend/.env"
 pm2 restart msh-api

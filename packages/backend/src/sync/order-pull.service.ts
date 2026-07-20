@@ -13,6 +13,7 @@ import type {
   WcOrderRemote,
 } from './sync.types';
 import { SYNC_QUEUE_NAME, WC_ORDERS_PAGE_SIZE } from './sync.types';
+import { recomputeCustomerStats } from './customer-stats.util';
 
 /** WC sometimes returns empty strings for numeric fields; Prisma.Decimal rejects those. */
 function wcDecimal(value: unknown): Prisma.Decimal {
@@ -192,6 +193,7 @@ export class OrderPullService {
       newestDateModified: newestModified ? newestModified.toISOString() : null,
     };
     await this.finalize(syncJobId, report, finishedAt, newestModified);
+    await recomputeCustomerStats(this.prisma, siteId);
     return report;
   }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomersService } from '../customers/customers.service';
 
 /**
  * Aggregated storewide metrics for the admin dashboard (Phase 4).
@@ -12,7 +13,10 @@ import { PrismaService } from '../prisma/prisma.service';
  */
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly customers: CustomersService,
+  ) {}
 
   async getSummary() {
     const since = new Date();
@@ -44,6 +48,7 @@ export class DashboardService {
       duplicateOnSiteRow,
       latestSyncRows,
       expiringSoonProducts,
+      crossSiteDuplicateCountResult,
     ] = await Promise.all([
       this.prisma.product.count(),
       this.prisma.siteConfig.count(),
@@ -140,6 +145,7 @@ export class DashboardService {
           totalStock: true,
         },
       }),
+      this.customers.countCrossSiteDuplicateGroups(),
     ]);
 
     const lowStockCount = lowStockCountRow[0]?.c ?? 0;
@@ -151,12 +157,14 @@ export class DashboardService {
     const pendingMappingReviews = pendingMappingRow;
     const failedSyncCount = recentFailedSyncRow;
     const duplicateOnSiteCount = duplicateOnSiteRow[0]?.c ?? 0;
+    const crossSiteDuplicateCount = crossSiteDuplicateCountResult ?? 0;
     const activeAlerts =
       lowStockCount +
       expiringSoonCount +
       failedSyncCount +
       pendingMappingReviews +
-      duplicateOnSiteCount;
+      duplicateOnSiteCount +
+      crossSiteDuplicateCount;
 
     // ─── Order status breakdown (last 30d) ───────────────────────────────────
     const statusGroups = await this.prisma.order.groupBy({
@@ -221,6 +229,7 @@ export class DashboardService {
         pendingMappingReviews,
         failedSyncCount,
         duplicateOnSiteCount,
+        crossSiteDuplicateCount,
         activeAlerts,
       },
       alertBreakdown: {
@@ -229,6 +238,7 @@ export class DashboardService {
         failedSyncs: failedSyncCount,
         pendingMappingReviews,
         duplicateOnSite: duplicateOnSiteCount,
+        crossSiteDuplicates: crossSiteDuplicateCount,
       },
       revenueSeries: revenueLast30dRows.map((r) => ({ day: r.day, revenue: r.revenue, orders: r.orders })),
       statusBreakdown: statusGroups.map((g) => ({ status: g.status, count: g._count._all })),

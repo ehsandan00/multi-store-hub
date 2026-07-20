@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { to: '/import-export', labelKey: 'layout.nav.importExport', icon: '🗂️' },
   { to: '/sync', labelKey: 'layout.nav.sync', icon: '🔄' },
   { to: '/orders', labelKey: 'layout.nav.orders', icon: '🧾' },
+  { to: '/customers', labelKey: 'layout.nav.customers', icon: '👤' },
   {
     to: '/logistics',
     labelKey: 'layout.nav.logistics',

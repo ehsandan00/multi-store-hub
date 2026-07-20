@@ -17,6 +17,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { MatchingModule } from './matching/matching.module';
 import { ReportsModule } from './reports/reports.module';
 import { LogisticsOrdersModule } from './logistics-orders/logistics-orders.module';
+import { CustomersModule } from './customers/customers.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { envSchema } from './config/env.validation';
 
@@ -54,6 +55,7 @@ import { envSchema } from './config/env.validation';
     MatchingModule,
     ReportsModule,
     LogisticsOrdersModule,
+    CustomersModule,
   ],
   providers: [
     // JwtAuthGuard as default global guard; controllers can opt out with @Public()

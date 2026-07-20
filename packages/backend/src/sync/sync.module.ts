@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { SyncService } from './sync.service';
 import { OrderPullService } from './order-pull.service';
+import { CustomerPullService } from './customer-pull.service';
 import { SyncController } from './sync.controller';
 import { SyncProcessor } from './sync.processor';
 import { SyncScheduler } from './sync.scheduler';
@@ -45,11 +46,12 @@ import { SYNC_QUEUE_NAME } from './sync.types';
   providers: [
     SyncService,
     OrderPullService,
+    CustomerPullService,
     WooCommerceClient,
     AspNetProductClient,
     SyncProcessor,
     SyncScheduler,
   ],
-  exports: [SyncService, OrderPullService, WooCommerceClient, AspNetProductClient],
+  exports: [SyncService, OrderPullService, CustomerPullService, WooCommerceClient, AspNetProductClient],
 })
 export class SyncModule {}

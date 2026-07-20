@@ -6,6 +6,7 @@ export interface AlertBreakdown {
   failedSyncs: number;
   pendingMappingReviews: number;
   duplicateOnSite: number;
+  crossSiteDuplicates: number;
   total: number;
 }
 
@@ -18,6 +19,7 @@ export function getAlertBreakdown(summary: DashboardSummary | undefined): AlertB
       failedSyncs: 0,
       pendingMappingReviews: 0,
       duplicateOnSite: 0,
+      crossSiteDuplicates: 0,
       total: 0,
     };
   }
@@ -30,9 +32,10 @@ export function getAlertBreakdown(summary: DashboardSummary | undefined): AlertB
   const pendingMappingReviews =
     k.pendingMappingReviews ?? b?.pendingMappingReviews ?? 0;
   const duplicateOnSite = k.duplicateOnSiteCount ?? b?.duplicateOnSite ?? 0;
+  const crossSiteDuplicates = k.crossSiteDuplicateCount ?? b?.crossSiteDuplicates ?? 0;
 
   const knownWithoutSync =
-    lowStock + expiringSoon + pendingMappingReviews + duplicateOnSite;
+    lowStock + expiringSoon + pendingMappingReviews + duplicateOnSite + crossSiteDuplicates;
 
   let failedSyncs: number;
   if (typeof k.failedSyncCount === 'number') {
@@ -52,6 +55,7 @@ export function getAlertBreakdown(summary: DashboardSummary | undefined): AlertB
     failedSyncs,
     pendingMappingReviews,
     duplicateOnSite,
+    crossSiteDuplicates,
     total,
   };
 }

@@ -14,6 +14,7 @@ import { SitesList } from './pages/Sites/List';
 import { ImportExportPage } from './pages/ImportExport';
 import { SyncPage } from './pages/Sync';
 import { OrdersList } from './pages/Orders/List';
+import { CustomersList } from './pages/Customers/List';
 import { LogisticsPage } from './pages/Logistics/Index';
 import { MatchingPage } from './pages/Matching';
 import { ComparePage } from './pages/Compare';
@@ -78,6 +79,7 @@ export default function App() {
           <Route path="/import-export" element={<ImportExportPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/orders" element={<OrdersList />} />
+          <Route path="/customers" element={<CustomersList />} />
           <Route
             path="/logistics"
             element={

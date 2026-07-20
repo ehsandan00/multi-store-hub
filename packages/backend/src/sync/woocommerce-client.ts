@@ -3,13 +3,14 @@ import { HttpProxyService, type ProxyResponse } from '../http-proxy/http-proxy.s
 import { HttpProxyError, type NetworkRoute } from '../http-proxy/http-proxy.error';
 import { decrypt } from '../config/crypto.util';
 import { PrismaService } from '../prisma/prisma.service';
-import type { WcProductPayload, WcProductRemote, WcOrderRemote } from './sync.types';
+import type { WcProductPayload, WcProductRemote, WcOrderRemote, WcCustomerRemote } from './sync.types';
 import {
   SYNC_DEFAULT_CONCURRENCY,
   SYNC_DEFAULT_MIN_INTERVAL_MS,
   WC_API_PREFIX,
   WC_LOOKUP_PAGE_SIZE,
   WC_ORDERS_PAGE_SIZE,
+  WC_CUSTOMERS_PAGE_SIZE,
 } from './sync.types';
 
 /**
@@ -168,6 +169,31 @@ export class WooCommerceClient {
       path: `${WC_API_PREFIX}/orders/${remoteId}`,
     });
     return res.body;
+  }
+
+  // ─── Customer pull (site → hub) ───────────────────────────────────────────
+
+  /** Lists a page of WC customers, optionally filtered by modified_after. */
+  async listCustomers(
+    siteId: string,
+    params: { modifiedAfter?: Date; page?: number; perPage?: number } = {},
+  ): Promise<WcCustomerRemote[]> {
+    const creds = await this.loadCredentials(siteId);
+    const page = Math.max(1, params.page ?? 1);
+    const perPage = Math.min(100, Math.max(1, params.perPage ?? WC_CUSTOMERS_PAGE_SIZE));
+    const qs = new URLSearchParams();
+    qs.set('per_page', String(perPage));
+    qs.set('page', String(page));
+    qs.set('orderby', 'registered');
+    qs.set('order', 'asc');
+    if (params.modifiedAfter) {
+      qs.set('modified_after', params.modifiedAfter.toISOString());
+    }
+    const res = await this.dispatch<WcCustomerRemote[]>(siteId, creds, {
+      method: 'GET',
+      path: `${WC_API_PREFIX}/customers?${qs.toString()}`,
+    });
+    return Array.isArray(res.body) ? res.body : [];
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────

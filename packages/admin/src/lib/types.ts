@@ -527,6 +527,7 @@ export interface DashboardKpis {
   pendingMappingReviews: number;
   failedSyncCount: number;
   duplicateOnSiteCount: number;
+  crossSiteDuplicateCount: number;
   activeAlerts: number;
 }
 
@@ -536,6 +537,7 @@ export interface DashboardAlertBreakdown {
   failedSyncs: number;
   pendingMappingReviews: number;
   duplicateOnSite: number;
+  crossSiteDuplicates: number;
 }
 
 export interface RevenueSeriesPoint {
@@ -893,4 +895,61 @@ export interface CustomersReportQuery {
   sortDir?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
+}
+
+export interface CustomerRow {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  remoteCustomerId: number | null;
+  totalOrdersCount: number;
+  totalSpent: string;
+  crossSiteDuplicate: boolean;
+  createdAt: string;
+}
+
+export interface ListCustomersQuery {
+  siteId: string;
+  search?: string;
+  sortBy?: 'name' | 'totalOrdersCount' | 'totalSpent' | 'createdAt';
+  sortDir?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CrossSiteDuplicateCustomer {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  siteId: string | null;
+  siteName: string | null;
+}
+
+export interface CrossSiteDuplicateGroup {
+  matchKey: string;
+  matchType: 'email' | 'phone';
+  customers: CrossSiteDuplicateCustomer[];
+}
+
+export interface CrossSiteDuplicatesResult {
+  groups: CrossSiteDuplicateGroup[];
+  totalGroups: number;
+}
+
+export interface PaginatedCustomers {
+  data: CustomerRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface EnqueueCustomerPullResult {
+  id: string;
+  status: SyncJobStatus;
+  queued: boolean;
 }

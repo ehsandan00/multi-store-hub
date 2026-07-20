@@ -67,6 +67,14 @@ export function AlertsPage() {
       to: '/matching?tab=duplicates',
       tone: 'red' as const,
     },
+    {
+      key: 'crossSiteDuplicates',
+      count: b.crossSiteDuplicates,
+      label: t('alerts.crossSiteDuplicates'),
+      desc: t('alerts.crossSiteDuplicatesDesc'),
+      to: '/customers?tab=duplicates',
+      tone: 'amber' as const,
+    },
   ];
 
   return (
