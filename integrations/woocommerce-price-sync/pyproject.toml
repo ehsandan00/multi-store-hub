@@ -20,6 +20,8 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 woocommerce-price-sync = "woocommerce_price_sync.cli:main"
 woocommerce-excel-fix = "woocommerce_price_sync.excel_fix:main"
+description-product = "woocommerce_price_sync.description_product:main"
+generate-descriptions = "woocommerce_price_sync.generate_descriptions:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/woocommerce_price_sync"]
