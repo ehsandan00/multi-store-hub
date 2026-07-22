@@ -290,6 +290,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Regenerate category-fallback descriptions with web research",
     )
+    parser.add_argument(
+        "--save-every",
+        type=int,
+        default=25,
+        help="Write checkpoint every N products (0 disables checkpoints)",
+    )
     return parser
 
 
