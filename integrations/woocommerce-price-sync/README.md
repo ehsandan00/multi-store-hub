@@ -197,27 +197,56 @@ That is not built yet; say if you want it added to `woocommerce-price-sync`.
 
 ### Option C: Built-in description generator
 
-Generate Persian HTML descriptions (short, long, infographic, table, FAQ) from the
-sync report or catalog:
+Generate Persian HTML descriptions from **catalog.xlsx** (parent + simple products only):
 
 ```powershell
-generate-descriptions --limit 20
+cd integrations/woocommerce-price-sync
+python3 -m woocommerce_price_sync.generate_descriptions --catalog data/catalog.xlsx --all
 ```
 
-- Reads `data/sync-report.xlsx` (`Results` sheet) when available.
-- Falls back to `data/catalog.xlsx` parent/simple products when the sync report is empty.
-- Skips titles already present in `data/descriptions-report.xlsx`.
-- Writes/merges output to `data/descriptions-report.xlsx`.
+Regenerate everything (new format or after prompt changes):
+
+```powershell
+python3 -m woocommerce_price_sync.generate_descriptions --catalog data/catalog.xlsx --all --force
+```
+
+**Input:** `data/catalog.xlsx` — column `نام کالا` (column C). Variation rows are skipped.
+
+**Output:** `data/descriptions-report.xlsx` with 4 columns:
+
+| Column | Content |
+|--------|---------|
+| `sku` | کد کالا |
+| `product_name` | نام کالا |
+| `short_description` | 2 professional paragraphs + usage tips |
+| `full_description` | long description + product table + product FAQ (HTML) |
 
 List pending products without generating:
 
 ```powershell
-description-product --limit 20
+description-product --catalog data/catalog.xlsx --limit 20
 ```
 
 Researched product facts live in `description_product_data.py`. Other products
 use category-aware fallback content based on the title (cosmetics, supplements,
 fragrance, etc.). Expand `PRODUCT_FACTS` over time for higher-quality copy.
+
+### Cursor Automation (cron)
+
+If you use a scheduled Cursor Automation for descriptions, update its prompt to match:
+
+- **Input file:** `integrations/woocommerce-price-sync/data/catalog.xlsx` (not `sync-report.xlsx`)
+- **Output file:** `integrations/woocommerce-price-sync/data/descriptions-report.xlsx`
+- **4 output columns:** sku, product_name, short_description, full_description
+- **full_description** = description + FAQ + table (product-specific, built from catalog title/details)
+- **Parents only:** skip variation rows; include simple products
+- **Do not change** price or title
+
+Suggested CLI for the agent to run after code is on the branch:
+
+```bash
+python3 -m woocommerce_price_sync.generate_descriptions --catalog data/catalog.xlsx --all --force
+```
 
 The report actions are `unchanged`, `would_update`, `updated`, `would_create`,
 `created`, `would_convert`, `converted`, `ambiguous`, and `error`. A run exits
