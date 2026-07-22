@@ -270,16 +270,7 @@ def run_batch(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    parser.add_argument(
-        "--catalog",
-        type=Path,
-        help="Path to catalog workbook (implies --catalog-only)",
-    )
-    args = parser.parse_args(argv)
-
-    if args.catalog is not None:
-        args.catalog_only = True
+    args = build_parser().parse_args(argv)
 
     _, default_catalog, _ = default_paths()
     limit = None if args.all else args.limit
@@ -289,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         output=args.output,
         limit=limit,
         force=args.force,
-        catalog_only=args.catalog_only,
+        catalog_only=True,
         use_network=not args.no_web_research,
     )
     from openpyxl import load_workbook
