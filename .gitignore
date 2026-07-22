@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+.venv/
+__pycache__/
+*.py[cod]
 
 # Build outputs
 dist/
@@ -38,6 +41,7 @@ Thumbs.db
 coverage/
 .nyc_output/
 *.lcov
+.pytest_cache/
 
 # Prisma generated client (committed via prisma generate; ignore local artifacts)
 packages/backend/prisma/migrations/dev.db*
