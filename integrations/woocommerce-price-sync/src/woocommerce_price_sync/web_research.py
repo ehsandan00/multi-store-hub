@@ -112,7 +112,8 @@ def research_product_title(
         if len(first) > 40:
             result["summary_hint"] = first[:280]
 
-    store[title] = result
+    if use_network or result["snippets"] or result["summary_hint"]:
+        store[title] = result
     return result
 
 
