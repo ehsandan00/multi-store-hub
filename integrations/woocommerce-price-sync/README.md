@@ -195,6 +195,30 @@ Add a second command that:
 
 That is not built yet; say if you want it added to `woocommerce-price-sync`.
 
+### Option C: Built-in description generator
+
+Generate Persian HTML descriptions (short, long, infographic, table, FAQ) from the
+sync report or catalog:
+
+```powershell
+generate-descriptions --limit 20
+```
+
+- Reads `data/sync-report.xlsx` (`Results` sheet) when available.
+- Falls back to `data/catalog.xlsx` parent/simple products when the sync report is empty.
+- Skips titles already present in `data/descriptions-report.xlsx`.
+- Writes/merges output to `data/descriptions-report.xlsx`.
+
+List pending products without generating:
+
+```powershell
+description-product --limit 20
+```
+
+Researched product facts live in `description_product_data.py`. Other products
+use category-aware fallback content based on the title (cosmetics, supplements,
+fragrance, etc.). Expand `PRODUCT_FACTS` over time for higher-quality copy.
+
 The report actions are `unchanged`, `would_update`, `updated`, `would_create`,
 `created`, `would_convert`, `converted`, `ambiguous`, and `error`. A run exits
 with code `1` if row-level errors occurred and code `2` for configuration or
