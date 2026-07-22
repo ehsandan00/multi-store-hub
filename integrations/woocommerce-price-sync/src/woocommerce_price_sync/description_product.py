@@ -11,17 +11,10 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 DESCRIPTION_HEADERS = [
-    "woo_product_id",
-    "code",
-    "title",
+    "sku",
+    "product_name",
     "short_description",
-    "description",
-    "infographic",
-    "table_html",
-    "faq_html",
-    "seo_title",
-    "status",
-    "notes",
+    "full_description",
 ]
 
 SYNC_RESULT_HEADERS = {
@@ -58,15 +51,16 @@ class ProductFacts:
 
 @dataclass
 class ProductDescription:
-    woo_product_id: str | int | None
     code: str
     title: str
     short_description: str
-    description: str
-    infographic: str
-    table_html: str
-    faq_html: str
-    seo_title: str
+    full_description: str
+    woo_product_id: str | int | None = None
+    description: str = ""
+    infographic: str = ""
+    table_html: str = ""
+    faq_html: str = ""
+    seo_title: str = ""
     status: str = "generated"
     notes: str = ""
 
@@ -387,24 +381,66 @@ def build_infographic_html(facts: ProductFacts) -> str:
 </html>"""
 
 
-def build_table_html(facts: ProductFacts) -> str:
-    rows = ""
-    for name, amount, nrv in facts.ingredients:
-        rows += (
-            "<tr>"
-            f"<td>{_escape_html(name)}</td>"
-            f"<td>{_escape_html(amount)}</td>"
-            f"<td>{_escape_html(nrv)}</td>"
-            "</tr>"
-        )
-    if not rows:
-        for label, value in facts.quick_facts:
+def _is_supplement(facts: ProductFacts) -> bool:
+    if facts.product_type == "مکمل غذایی":
+        return True
+    return bool(re.search(r"مولتی.?ویتامین|ویتامین|مکمل|کپسول|قرص|tablet|capsule", facts.title, re.I))
+
+
+def _build_spec_table_rows(facts: ProductFacts) -> tuple[str, str, str, str]:
+    if _is_supplement(facts) and facts.ingredients:
+        header_cols = ("ترکیب", "مقدار", "درصد نیاز روزانه (NRV)")
+        rows = ""
+        for name, amount, nrv in facts.ingredients:
             rows += (
                 "<tr>"
-                f"<td>{_escape_html(label)}</td>"
-                f"<td colspan=\"2\">{_escape_html(value)}</td>"
+                f"<td>{_escape_html(name)}</td>"
+                f"<td>{_escape_html(amount)}</td>"
+                f"<td>{_escape_html(nrv)}</td>"
                 "</tr>"
             )
+        return rows, header_cols[0], header_cols[1], header_cols[2]
+
+    spec_rows: list[tuple[str, str, str]] = [
+        ("نام محصول", facts.title, "—"),
+        ("برند", facts.brand or "—", "برند سازنده محصول"),
+        ("نوع", facts.product_type or "—", "دسته‌بندی محصول"),
+        ("فرم", facts.form or "—", "نوع بسته‌بندی یا بافت"),
+    ]
+    if facts.volume:
+        spec_rows.append(("حجم/تعداد", facts.volume, "مشخصات بسته"))
+    if facts.count:
+        spec_rows.append(("تعداد", facts.count, "تعداد در بسته"))
+
+    for name, amount, nrv in facts.ingredients[:4]:
+        spec_rows.append(("ترکیب کلیدی", name, f"{amount} — {nrv}".strip(" —")))
+
+    for title, body in facts.benefits[:3]:
+        spec_rows.append(("مزیت", title, body))
+
+    if facts.usage_steps:
+        spec_rows.append(("روش استفاده", facts.usage_steps[0], "طبق دستور بسته‌بندی"))
+
+    if facts.suitable_for:
+        spec_rows.append(("مناسب برای", "، ".join(facts.suitable_for[:3]), "گروه هدف"))
+
+    if facts.cautions:
+        spec_rows.append(("احتیاط", facts.cautions[0], "نکته ایمنی"))
+
+    rows = ""
+    for col1, col2, col3 in spec_rows:
+        rows += (
+            "<tr>"
+            f"<td>{_escape_html(col1)}</td>"
+            f"<td>{_escape_html(col2)}</td>"
+            f"<td>{_escape_html(col3)}</td>"
+            "</tr>"
+        )
+    return rows, "مشخصه", "جزئیات", "توضیح"
+
+
+def build_table_html(facts: ProductFacts) -> str:
+    rows, col1, col2, col3 = _build_spec_table_rows(facts)
     return f"""<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -484,9 +520,9 @@ def build_table_html(facts: ProductFacts) -> str:
       <table class="rose-table">
         <thead>
           <tr>
-            <th>مشخصه / ترکیب</th>
-            <th>مقدار</th>
-            <th>درصد نیاز روزانه</th>
+            <th>{col1}</th>
+            <th>{col2}</th>
+            <th>{col3}</th>
           </tr>
         </thead>
         <tbody>
@@ -620,6 +656,11 @@ def generate_long_description(facts: ProductFacts) -> str:
         f"{facts.title} با فرمولی متعادل و حرفه‌ای، انتخابی مناسب برای تکمیل "
         "روتین مراقبتی روزانه شماست."
     )
+    geo_line = (
+        f"برای خرید اصل {facts.title} "
+        f"{f'از برند {facts.brand} ' if facts.brand else ''}"
+        "با ارسال سریع به سراسر ایران، می‌توانید از فروشگاه آنلاین اسلی اقدام کنید."
+    )
     benefit_lines = "".join(
         f"<li><strong>{_escape_html(title)}:</strong> {_escape_html(body)}</li>"
         for title, body in facts.benefits[:5]
@@ -627,23 +668,32 @@ def generate_long_description(facts: ProductFacts) -> str:
     return (
         f"<h2>{_escape_html(seo_title)}</h2>"
         f"<p>{_escape_html(intro)}</p>"
-        f"<h3>مزایای اصلی</h3><ul>{benefit_lines}</ul>"
+        f"<p>{_escape_html(geo_line)}</p>"
+        f"<h3>مزایای اسلی</h3><ul>{benefit_lines}</ul>"
         f"<h3>راهنمای استفاده</h3>"
         f"<ol>{''.join(f'<li>{_escape_html(step)}</li>' for step in facts.usage_steps[:4])}</ol>"
     )
 
 
+def combine_full_description(long_html: str, table_html: str, faq_html: str) -> str:
+    return f"{long_html}\n{table_html}\n{faq_html}"
+
+
 def build_description(facts: ProductFacts) -> ProductDescription:
     seo_title = generate_seo_title(facts)
+    long_html = generate_long_description(facts)
+    table_html = build_table_html(facts)
+    faq_html = build_faq_html(facts)
     return ProductDescription(
-        woo_product_id=facts.woo_product_id,
         code=facts.code,
         title=facts.title,
         short_description=generate_short_description(facts),
-        description=generate_long_description(facts),
+        full_description=combine_full_description(long_html, table_html, faq_html),
+        woo_product_id=facts.woo_product_id,
+        description=long_html,
         infographic=build_infographic_html(facts),
-        table_html=build_table_html(facts),
-        faq_html=build_faq_html(facts),
+        table_html=table_html,
+        faq_html=faq_html,
         seo_title=seo_title,
     )
 
@@ -762,14 +812,24 @@ def read_descriptions_report(path: str | Path) -> dict[str, ProductDescription]:
         headers = _header_map(rows[0])
         results: dict[str, ProductDescription] = {}
         for row in rows[1:]:
-            title = _pick(row, headers, {"title"})
+            title = _pick(row, headers, {"product_name", "title", "نام کالا"})
             if not title:
                 continue
+            code = _pick(row, headers, {"sku", "code", "کد کالا"})
+            short_description = _pick(row, headers, {"short_description"})
+            full_description = _pick(row, headers, {"full_description"})
+            if not full_description:
+                description = _pick(row, headers, {"description"})
+                table_html = _pick(row, headers, {"table_html"})
+                faq_html = _pick(row, headers, {"faq_html"})
+                if description or table_html or faq_html:
+                    full_description = combine_full_description(description, table_html, faq_html)
             results[title] = ProductDescription(
-                woo_product_id=_pick(row, headers, {"woo_product_id"}) or None,
-                code=_pick(row, headers, {"code"}),
+                code=code,
                 title=title,
-                short_description=_pick(row, headers, {"short_description"}),
+                short_description=short_description,
+                full_description=full_description,
+                woo_product_id=_pick(row, headers, {"woo_product_id"}) or None,
                 description=_pick(row, headers, {"description"}),
                 infographic=_pick(row, headers, {"infographic"}),
                 table_html=_pick(row, headers, {"table_html"}),
@@ -806,21 +866,14 @@ def write_descriptions_report(
     for item in descriptions:
         sheet.append(
             [
-                item.woo_product_id,
                 item.code,
                 item.title,
                 item.short_description,
-                item.description,
-                item.infographic,
-                item.table_html,
-                item.faq_html,
-                item.seo_title,
-                item.status,
-                item.notes,
+                item.full_description,
             ]
         )
 
-    widths = [16, 16, 42, 40, 50, 20, 20, 20, 36, 12, 30]
+    widths = [16, 42, 40, 80]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
 
@@ -860,15 +913,22 @@ def load_pending_products(
     catalog: Path,
     descriptions_report: Path,
     limit: int | None = None,
+    force: bool = False,
+    catalog_only: bool = False,
 ) -> list[ProductFacts]:
-    products = read_sync_report_products(sync_report)
-    source = sync_report
-    if not products and catalog.is_file():
+    products: list[ProductFacts] = []
+    if catalog_only and catalog.is_file():
         products = read_catalog_products(catalog)
-        source = catalog
+    else:
+        products = read_sync_report_products(sync_report)
+        if not products and catalog.is_file():
+            products = read_catalog_products(catalog)
 
-    existing = read_descriptions_report(descriptions_report) if descriptions_report.is_file() else {}
-    pending = [product for product in products if product.title not in existing]
+    if force:
+        pending = products
+    else:
+        existing = read_descriptions_report(descriptions_report) if descriptions_report.is_file() else {}
+        pending = [product for product in products if product.title not in existing]
     if limit is not None:
         pending = pending[:limit]
     return pending
@@ -901,7 +961,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=20,
-        help="Maximum number of pending products to list for generation",
+        help="Maximum number of pending products to process (ignored with --all)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process all eligible parent/simple products",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate descriptions even if already present in the report",
+    )
+    parser.add_argument(
+        "--catalog-only",
+        action="store_true",
+        help="Read products only from catalog.xlsx (skip sync-report.xlsx)",
+    )
+    parser.add_argument(
+        "--no-web-research",
+        action="store_true",
+        help="Skip live web research (use cache and built-in facts only)",
     )
     return parser
 

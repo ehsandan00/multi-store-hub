@@ -26,6 +26,9 @@ def test_build_description_contains_sections(tmp_path):
     assert "faq-lilac-block" in result.faq_html
     assert result.short_description.count("<p>") == 2
     assert result.seo_title
+    assert "مزایای اسلی" in result.full_description
+    assert "rose-table-block" in result.full_description
+    assert "faq-lilac-block" in result.full_description
 
 
 def test_generate_description_for_product():
