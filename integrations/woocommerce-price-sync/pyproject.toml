@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "woocommerce-price-sync"
+version = "0.1.0"
+description = "Safely sync WooCommerce prices and products from Excel"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openpyxl>=3.1",
+  "python-dotenv>=1.0",
+  "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+woocommerce-price-sync = "woocommerce_price_sync.cli:main"
+woocommerce-excel-fix = "woocommerce_price_sync.excel_fix:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/woocommerce_price_sync"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
