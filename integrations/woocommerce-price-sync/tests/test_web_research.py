@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from woocommerce_price_sync.generate_descriptions import generate_description_for_product
-from woocommerce_price_sync.web_research import enrich_facts_from_web
+from woocommerce_price_sync.web_research import WebResearchCache, enrich_facts_from_web
 from woocommerce_price_sync.description_product import ProductFacts
 
 
@@ -12,7 +12,7 @@ def test_generate_description_for_product():
         web_search=False,
     )
     assert item.title.startswith("A Z")
-    assert "EuRho Vital" in item.infographic or "مولتی" in item.description
+    assert "مولتی" in item.full_description
 
 
 def test_enrich_facts_from_web_uses_cache(tmp_path):
@@ -28,16 +28,21 @@ def test_enrich_facts_from_web_uses_cache(tmp_path):
         "woocommerce_price_sync.web_research.research_product_snippets",
         return_value=["Vitamin C serum helps brighten skin and provides antioxidant support."],
     ):
-        enriched = enrich_facts_from_web(facts, cache=__import__("woocommerce_price_sync.web_research", fromlist=["WebResearchCache"]).WebResearchCache(cache_path))
+        enriched = enrich_facts_from_web(
+            facts,
+            cache=WebResearchCache(cache_path),
+        )
     assert enriched.summary
     assert enriched.benefits
 
 
-def test_generate_description_long_has_geo_aeo_blocks():
+def test_full_description_includes_table_and_faq():
     item = generate_description_for_product(
         "Baccarat Rouge 540 باکارات رژ",
         code="PC-6963",
         web_search=False,
     )
-    assert "خرید آنلاین" in item.description
-    assert "پرسش‌های رایج" in item.description
+    assert "خرید آنلاین" in item.full_description
+    assert "rose-table-block" in item.full_description
+    assert "faq-lilac-block" in item.full_description
+    assert "باکارات" in item.full_description

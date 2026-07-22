@@ -11,17 +11,10 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
 
 DESCRIPTION_HEADERS = [
-    "woo_product_id",
-    "code",
-    "title",
+    "sku",
+    "product_name",
     "short_description",
-    "description",
-    "infographic",
-    "table_html",
-    "faq_html",
-    "seo_title",
-    "status",
-    "notes",
+    "full_description",
 ]
 
 SYNC_RESULT_HEADERS = {
@@ -58,16 +51,10 @@ class ProductFacts:
 
 @dataclass
 class ProductDescription:
-    woo_product_id: str | int | None
-    code: str
+    sku: str
     title: str
     short_description: str
-    description: str
-    infographic: str
-    table_html: str
-    faq_html: str
-    seo_title: str
-    status: str = "generated"
+    full_description: str
     notes: str = ""
 
 
@@ -387,9 +374,132 @@ def build_infographic_html(facts: ProductFacts) -> str:
 </html>"""
 
 
-def build_table_html(facts: ProductFacts) -> str:
-    rows = ""
+def product_sku(facts: ProductFacts) -> str:
+    for value in (facts.code, facts.woo_product_id):
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def build_product_table_rows(facts: ProductFacts) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+
+    def add(label: str, value: str, note: str = "—") -> None:
+        key = label.casefold()
+        if not value or key in seen:
+            return
+        seen.add(key)
+        rows.append((label, value, note))
+
+    add("نام محصول", facts.title)
+    if facts.brand:
+        add("برند", facts.brand)
+    if facts.product_type:
+        add("نوع محصول", facts.product_type)
+    if facts.form:
+        add("فرم", facts.form)
+    if facts.volume:
+        add("حجم / اندازه", facts.volume)
+    if facts.count:
+        add("تعداد", facts.count)
+    for label, value in facts.quick_facts:
+        add(label, value)
     for name, amount, nrv in facts.ingredients:
+        add(name, amount, nrv)
+    for title, body in facts.benefits[:4]:
+        add(f"مزیت: {title}", body)
+    if facts.usage_steps:
+        add("روش مصرف", "؛ ".join(facts.usage_steps[:3]))
+    if facts.suitable_for:
+        add("مناسب برای", "، ".join(facts.suitable_for[:4]))
+    if facts.cautions:
+        add("نکات مهم", "؛ ".join(facts.cautions[:3]))
+    return rows[:12]
+
+
+def build_product_faq_list(facts: ProductFacts) -> list[tuple[str, str]]:
+    faq: list[tuple[str, str]] = []
+    seen_questions: set[str] = set()
+
+    def add(question: str, answer: str) -> None:
+        key = question.casefold()
+        if key in seen_questions or not answer:
+            return
+        seen_questions.add(key)
+        faq.append((question, answer))
+
+    for question, answer in facts.faq:
+        add(question, answer)
+
+    if facts.usage_steps:
+        add(
+            f"روش استفاده از {facts.title} چگونه است؟",
+            " ".join(facts.usage_steps[:3]),
+        )
+    if facts.brand:
+        add(
+            f"برند {facts.title} چیست؟",
+            f"{facts.title} محصول برند {facts.brand} است.",
+        )
+    if facts.product_type:
+        add(
+            f"{facts.title} برای چه منظوری است؟",
+            f"این محصول در دسته {facts.product_type} قرار دارد "
+            f"و برای {('، '.join(facts.main_uses[:3]) if facts.main_uses else 'مراقبت روزانه')} مناسب است.",
+        )
+    if facts.suitable_for:
+        add(
+            f"{facts.title} برای چه کسانی مناسب است؟",
+            "، ".join(facts.suitable_for[:4]),
+        )
+    if facts.cautions:
+        add(
+            f"نکات مهم هنگام استفاده از {facts.title} چیست؟",
+            "؛ ".join(facts.cautions[:3]),
+        )
+    if facts.benefits:
+        title, body = facts.benefits[0]
+        add(
+            f"مهم‌ترین مزیت {facts.title} چیست؟",
+            f"{title}: {body}",
+        )
+    if facts.ingredients and facts.product_type == "مکمل غذایی":
+        names = "، ".join(name for name, _, _ in facts.ingredients[:4])
+        add(
+            f"ترکیبات اصلی {facts.title} کدامند؟",
+            f"فرمول شامل {names} است.",
+        )
+    elif facts.ingredients and facts.product_type == "عطر":
+        names = "، ".join(name for name, role, _ in facts.ingredients[:4])
+        add(
+            f"نت‌های بویایی {facts.title} چیست؟",
+            f"ترکیب رایحه شامل {names} است.",
+        )
+    elif facts.ingredients:
+        names = "، ".join(name for name, role, _ in facts.ingredients[:4])
+        add(
+            f"ترکیبات کلیدی {facts.title} چیست؟",
+            f"فرمول حاوی {names} است.",
+        )
+
+    add(
+        f"آیا {facts.title} اصل است؟",
+        "محصول را از فروشگاه معتبر با ضمانت اصالت تهیه کنید.",
+    )
+    return faq[:8]
+
+
+def build_table_html(facts: ProductFacts) -> str:
+    table_rows = build_product_table_rows(facts)
+    is_supplement = facts.product_type == "مکمل غذایی" and bool(facts.ingredients)
+    if is_supplement and facts.ingredients:
+        headers = ("مشخصه / ترکیب", "مقدار", "درصد نیاز روزانه")
+    else:
+        headers = ("مشخصه", "جزئیات", "توضیح")
+
+    rows = ""
+    for name, amount, nrv in table_rows:
         rows += (
             "<tr>"
             f"<td>{_escape_html(name)}</td>"
@@ -397,14 +507,6 @@ def build_table_html(facts: ProductFacts) -> str:
             f"<td>{_escape_html(nrv)}</td>"
             "</tr>"
         )
-    if not rows:
-        for label, value in facts.quick_facts:
-            rows += (
-                "<tr>"
-                f"<td>{_escape_html(label)}</td>"
-                f"<td colspan=\"2\">{_escape_html(value)}</td>"
-                "</tr>"
-            )
     return f"""<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -484,9 +586,9 @@ def build_table_html(facts: ProductFacts) -> str:
       <table class="rose-table">
         <thead>
           <tr>
-            <th>مشخصه / ترکیب</th>
-            <th>مقدار</th>
-            <th>درصد نیاز روزانه</th>
+            <th>{_escape_html(headers[0])}</th>
+            <th>{_escape_html(headers[1])}</th>
+            <th>{_escape_html(headers[2])}</th>
           </tr>
         </thead>
         <tbody>
@@ -502,7 +604,7 @@ def build_table_html(facts: ProductFacts) -> str:
 
 def build_faq_html(facts: ProductFacts) -> str:
     items = ""
-    for question, answer in facts.faq[:8]:
+    for question, answer in build_product_faq_list(facts):
         items += (
             '<article class="faq-item">'
             f'<button class="faq-question" type="button" aria-expanded="false">'
@@ -631,13 +733,6 @@ def generate_long_description(facts: ProductFacts) -> str:
             f"اصل برند <strong>{_escape_html(facts.brand)}</strong> "
             f"با ارسال سریع در سراسر ایران.</p>"
         )
-    aeo_block = ""
-    if facts.faq:
-        aeo_items = "".join(
-            f"<li><strong>{_escape_html(q)}</strong> {_escape_html(a)}</li>"
-            for q, a in facts.faq[:3]
-        )
-        aeo_block = f"<h3>پرسش‌های رایج</h3><ul>{aeo_items}</ul>"
     return (
         f"<h2>{_escape_html(seo_title)}</h2>"
         f"<p>{_escape_html(intro)}</p>"
@@ -645,22 +740,22 @@ def generate_long_description(facts: ProductFacts) -> str:
         f"<h3>مزایای اصلی</h3><ul>{benefit_lines}</ul>"
         f"<h3>راهنمای استفاده</h3>"
         f"<ol>{''.join(f'<li>{_escape_html(step)}</li>' for step in facts.usage_steps[:4])}</ol>"
-        f"{aeo_block}"
     )
 
 
+def build_full_description(description: str, table_html: str, faq_html: str) -> str:
+    return f"{description}\n{table_html}\n{faq_html}"
+
+
 def build_description(facts: ProductFacts) -> ProductDescription:
-    seo_title = generate_seo_title(facts)
+    description = generate_long_description(facts)
+    table_html = build_table_html(facts)
+    faq_html = build_faq_html(facts)
     return ProductDescription(
-        woo_product_id=facts.woo_product_id,
-        code=facts.code,
+        sku=product_sku(facts),
         title=facts.title,
         short_description=generate_short_description(facts),
-        description=generate_long_description(facts),
-        infographic=build_infographic_html(facts),
-        table_html=build_table_html(facts),
-        faq_html=build_faq_html(facts),
-        seo_title=seo_title,
+        full_description=build_full_description(description, table_html, faq_html),
     )
 
 
@@ -708,7 +803,7 @@ def _read_parent_products_from_rows(rows: list[tuple[Any, ...]]) -> list[Product
             continue
         woo_id = _pick(row, headers, {"woo_product_id"})
         code = _pick(row, headers, {"code", "کد کالا"})
-        dedupe_key = f"{woo_id}:{title}"
+        dedupe_key = f"{code}:{title}" if code else title
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
@@ -775,20 +870,24 @@ def read_descriptions_report(path: str | Path) -> dict[str, ProductDescription]:
         headers = _header_map(rows[0])
         results: dict[str, ProductDescription] = {}
         for row in rows[1:]:
-            title = _pick(row, headers, {"title"})
+            title = _pick(row, headers, {"product_name", "title", "نام کالا"})
             if not title:
                 continue
-            results[title] = ProductDescription(
-                woo_product_id=_pick(row, headers, {"woo_product_id"}) or None,
-                code=_pick(row, headers, {"code"}),
+            sku = _pick(row, headers, {"sku", "code", "کد کالا"})
+            short_description = _pick(row, headers, {"short_description"})
+            full_description = _pick(row, headers, {"full_description"})
+            if not full_description:
+                description = _pick(row, headers, {"description"})
+                table_html = _pick(row, headers, {"table_html"})
+                faq_html = _pick(row, headers, {"faq_html"})
+                if description or table_html or faq_html:
+                    full_description = build_full_description(description, table_html, faq_html)
+            key = f"{sku}:{title}" if sku else title
+            results[key] = ProductDescription(
+                sku=sku,
                 title=title,
-                short_description=_pick(row, headers, {"short_description"}),
-                description=_pick(row, headers, {"description"}),
-                infographic=_pick(row, headers, {"infographic"}),
-                table_html=_pick(row, headers, {"table_html"}),
-                faq_html=_pick(row, headers, {"faq_html"}),
-                seo_title=_pick(row, headers, {"seo_title"}),
-                status=_pick(row, headers, {"status"}) or "generated",
+                short_description=short_description,
+                full_description=full_description,
                 notes=_pick(row, headers, {"notes"}),
             )
         return results
@@ -819,21 +918,14 @@ def write_descriptions_report(
     for item in descriptions:
         sheet.append(
             [
-                item.woo_product_id,
-                item.code,
+                item.sku,
                 item.title,
                 item.short_description,
-                item.description,
-                item.infographic,
-                item.table_html,
-                item.faq_html,
-                item.seo_title,
-                item.status,
-                item.notes,
+                item.full_description,
             ]
         )
 
-    widths = [16, 16, 42, 40, 50, 20, 20, 20, 36, 12, 30]
+    widths = [18, 42, 40, 80]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
 
@@ -854,8 +946,13 @@ def merge_descriptions(
 ) -> list[ProductDescription]:
     merged = dict(existing)
     for item in new_items:
-        merged[item.title] = item
+        key = f"{item.sku}:{item.title}" if item.sku else item.title
+        merged[key] = item
     return sorted(merged.values(), key=lambda row: _slug_words(row.title))
+
+
+def description_key(item: ProductDescription) -> str:
+    return f"{item.sku}:{item.title}" if item.sku else item.title
 
 
 def default_paths(base_dir: Path | None = None) -> tuple[Path, Path, Path]:
@@ -869,23 +966,23 @@ def default_paths(base_dir: Path | None = None) -> tuple[Path, Path, Path]:
 
 def load_pending_products(
     *,
-    sync_report: Path,
     catalog: Path,
     descriptions_report: Path,
     limit: int | None = None,
     refresh_fallbacks: bool = False,
+    force: bool = False,
 ) -> list[ProductFacts]:
-    products = read_sync_report_products(sync_report)
-    source = sync_report
-    if not products and catalog.is_file():
-        products = read_catalog_products(catalog)
-        source = catalog
+    if not catalog.is_file():
+        raise FileNotFoundError(f"Catalog not found: {catalog}")
 
+    products = read_catalog_products(catalog)
     existing = read_descriptions_report(descriptions_report) if descriptions_report.is_file() else {}
     pending: list[ProductFacts] = []
     for product in products:
-        current = existing.get(product.title)
-        if current and not (refresh_fallbacks and current.notes in {"category-fallback", ""}):
+        sku = product_sku(product)
+        key = f"{sku}:{product.title}" if sku else product.title
+        current = existing.get(key)
+        if current and not force and not (refresh_fallbacks and current.notes in {"category-fallback", ""}):
             continue
         pending.append(product)
     if limit is not None:
@@ -894,21 +991,15 @@ def load_pending_products(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    sync_report, catalog, descriptions_report = default_paths()
+    _, catalog, descriptions_report = default_paths()
     parser = argparse.ArgumentParser(
-        description="Generate Persian WooCommerce product descriptions from sync report or catalog.",
-    )
-    parser.add_argument(
-        "--sync-report",
-        type=Path,
-        default=sync_report,
-        help="Path to sync-report.xlsx (Results sheet)",
+        description="List pending Persian product descriptions from catalog.xlsx.",
     )
     parser.add_argument(
         "--catalog",
         type=Path,
         default=catalog,
-        help="Fallback catalog workbook when sync report is empty",
+        help="Path to catalog.xlsx (parent + simple products only)",
     )
     parser.add_argument(
         "--output",
@@ -922,16 +1013,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=20,
         help="Maximum number of pending products to list for generation",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate all products regardless of existing output",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     pending = load_pending_products(
-        sync_report=args.sync_report,
         catalog=args.catalog,
         descriptions_report=args.output,
         limit=args.limit,
+        force=args.force,
     )
     if not pending:
         print("No pending products found.")
