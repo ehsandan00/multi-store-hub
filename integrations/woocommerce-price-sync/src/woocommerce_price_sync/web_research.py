@@ -96,6 +96,17 @@ def _search_duckduckgo(query: str, cache: WebResearchCache) -> list[str]:
     return snippets[:5]
 
 
+def _latin_search_terms(title: str) -> list[str]:
+    parts = re.findall(r"[A-Za-z][A-Za-z0-9&.'\- ]{1,40}", title)
+    cleaned = [re.sub(r"\s+", " ", part).strip() for part in parts]
+    cleaned = [part for part in cleaned if len(part) > 2]
+    if not cleaned:
+        return []
+    brand = cleaned[-1]
+    english_title = " ".join(cleaned)
+    return list(dict.fromkeys([english_title, brand, f"{brand} {cleaned[0]}"]))
+
+
 def research_product_snippets(title: str, *, cache: WebResearchCache | None = None) -> list[str]:
     cache = cache or WebResearchCache()
     cache_key = title.strip().casefold()
@@ -103,11 +114,12 @@ def research_product_snippets(title: str, *, cache: WebResearchCache | None = No
     if cached is not None:
         return list(cached.get("snippets") or [])
 
-    brand_match = re.findall(r"[A-Za-z][A-Za-z0-9&.'\- ]{1,30}", title)
-    brand = brand_match[-1].strip() if brand_match else ""
-    queries = [f"{title} benefits ingredients usage"]
-    if brand and brand.lower() not in title.lower():
-        queries.append(f"{brand} {title}")
+    latin_terms = _latin_search_terms(title)
+    queries = [f"{term} benefits ingredients usage" for term in latin_terms[:2]]
+    if not queries:
+        queries = [f"{title} benefits ingredients usage"]
+    else:
+        queries.append(f"{title} فواید ترکیبات")
 
     snippets: list[str] = []
     seen: set[str] = set()
