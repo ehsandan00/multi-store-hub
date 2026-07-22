@@ -873,6 +873,7 @@ def load_pending_products(
     catalog: Path,
     descriptions_report: Path,
     limit: int | None = None,
+    refresh_fallbacks: bool = False,
 ) -> list[ProductFacts]:
     products = read_sync_report_products(sync_report)
     source = sync_report
@@ -881,7 +882,12 @@ def load_pending_products(
         source = catalog
 
     existing = read_descriptions_report(descriptions_report) if descriptions_report.is_file() else {}
-    pending = [product for product in products if product.title not in existing]
+    pending: list[ProductFacts] = []
+    for product in products:
+        current = existing.get(product.title)
+        if current and not (refresh_fallbacks and current.notes in {"category-fallback", ""}):
+            continue
+        pending.append(product)
     if limit is not None:
         pending = pending[:limit]
     return pending

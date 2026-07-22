@@ -209,7 +209,18 @@ def _build_faq_from_context(title: str, product_type: str, usage_steps: list[str
     return faq[:5]
 
 
-def enrich_facts_from_web(
+def purge_empty_cache_entries(cache: WebResearchCache) -> int:
+    cache.load()
+    entries = cache._data.get("entries", {})
+    removed = 0
+    for key in list(entries):
+        snippets = entries[key].get("snippets") if isinstance(entries[key], dict) else None
+        if not snippets:
+            del entries[key]
+            removed += 1
+    if removed:
+        cache.save()
+    return removed
     facts: ProductFacts,
     *,
     cache: WebResearchCache | None = None,

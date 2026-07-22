@@ -16,7 +16,7 @@ from .description_product import (
     write_descriptions_report,
 )
 from .description_product_data import PRODUCT_FACTS, get_facts_for_product
-from .web_research import WebResearchCache, enrich_facts_from_web
+from .web_research import WebResearchCache, enrich_facts_from_web, purge_empty_cache_entries
 
 
 CATEGORY_HINTS: list[tuple[re.Pattern[str], str, str]] = [
@@ -201,23 +201,28 @@ def run_batch(
     limit: int | None = 20,
     web_search: bool = True,
     save_every: int = 25,
+    refresh_fallbacks: bool = False,
 ) -> Path:
     sync_path, catalog_path, output_path = default_paths()
     sync_report = sync_report or sync_path
     catalog = catalog or catalog_path
     output = output or output_path
 
+    web_cache = WebResearchCache()
+    if web_search:
+        purge_empty_cache_entries(web_cache)
+
     pending = load_pending_products(
         sync_report=sync_report,
         catalog=catalog,
         descriptions_report=output,
         limit=limit,
+        refresh_fallbacks=refresh_fallbacks,
     )
     if not pending:
         return output
 
     existing = read_descriptions_report(output) if output.is_file() else {}
-    web_cache = WebResearchCache()
     generated: list[ProductDescription] = []
 
     for index, product in enumerate(pending, start=1):
@@ -281,10 +286,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip DuckDuckGo web research enrichment",
     )
     parser.add_argument(
-        "--save-every",
-        type=int,
-        default=25,
-        help="Write checkpoint every N products (0 disables checkpoints)",
+        "--refresh-fallbacks",
+        action="store_true",
+        help="Regenerate category-fallback descriptions with web research",
     )
     return parser
 
@@ -299,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=limit,
         web_search=not args.no_web_search,
         save_every=args.save_every,
+        refresh_fallbacks=args.refresh_fallbacks,
     )
     existing = read_descriptions_report(report_path)
     print(f"Descriptions report written to: {report_path}")
