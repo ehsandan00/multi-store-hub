@@ -221,6 +221,9 @@ def purge_empty_cache_entries(cache: WebResearchCache) -> int:
     if removed:
         cache.save()
     return removed
+
+
+def enrich_facts_from_web(
     facts: ProductFacts,
     *,
     cache: WebResearchCache | None = None,
