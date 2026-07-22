@@ -23,7 +23,16 @@ CATEGORY_HINTS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"مولتی.?ویتامین|ویتامین|مکمل|کپسول|قرص|tablet|capsule", re.I), "مکمل غذایی", "قرص"),
     (re.compile(r"کرم|آبرسان|مرطوب|سرم|تونر|ماسک|لوسیون|ژل", re.I), "مراقبت پوست", "کرم"),
     (re.compile(r"شامپو|نرم.?کننده|ماسک مو", re.I), "مراقبت مو", "شامپو"),
-    (re.compile(r"عطر|ادو|پرفیوم|perfume", re.I), "عطر", "ادو پرفیوم"),
+    (
+        re.compile(
+            r"عطر|ادو|پرفیوم|perfume|cologne|eau de|davidoff|dior|chanel|ysl|"
+            r"lancome|hugo boss|calvin klein|versace|armani|burberry|gucci|"
+            r"baccarat|creed|tom ford|montblanc|azzaro|lacoste",
+            re.I,
+        ),
+        "عطر",
+        "ادو پرفیوم",
+    ),
     (re.compile(r"ریمل|خط چشم|پودر|کرم پودر|لیپ", re.I), "آرایشی", "محصول آرایشی"),
 ]
 

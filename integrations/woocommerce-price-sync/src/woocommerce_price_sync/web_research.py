@@ -15,7 +15,8 @@ from .description_product import ProductFacts
 _CACHE_VERSION = 1
 _DEFAULT_CACHE = Path(__file__).resolve().parents[2] / "data" / "web-research-cache.json"
 _USER_AGENT = (
-    "Mozilla/5.0 (compatible; WooCommerceDescriptionBot/1.0; +https://github.com/ehsandan00/multi-store-hub)"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 _REQUEST_TIMEOUT = 12
 _MIN_INTERVAL_SEC = 0.6
@@ -71,9 +72,9 @@ def _strip_html(text: str) -> str:
 
 def _search_duckduckgo(query: str, cache: WebResearchCache) -> list[str]:
     cache.throttle()
-    response = requests.get(
+    response = requests.post(
         "https://html.duckduckgo.com/html/",
-        params={"q": query},
+        data={"q": query, "b": ""},
         headers={"User-Agent": _USER_AGENT},
         timeout=_REQUEST_TIMEOUT,
     )
@@ -222,7 +223,9 @@ def enrich_facts_from_web(
         return facts
 
     volume = facts.volume or _extract_volume(facts.title, snippets)
-    summary = facts.summary or _build_summary_from_snippets(facts.title, snippets, facts.product_type)
+    summary = facts.summary
+    if snippets and (not summary or summary.startswith(facts.title)):
+        summary = _build_summary_from_snippets(facts.title, snippets, facts.product_type)
     benefits = list(facts.benefits)
     if len(benefits) < 3:
         web_benefits = _extract_benefit_phrases(snippets)
