@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import re
+import sys
 from pathlib import Path
 
 from .description_product import (
@@ -14,6 +16,7 @@ from .description_product import (
     write_descriptions_report,
 )
 from .description_product_data import PRODUCT_FACTS, get_facts_for_product
+from .web_research import WebResearchCache, enrich_facts_from_web
 
 
 CATEGORY_HINTS: list[tuple[re.Pattern[str], str, str]] = [
@@ -165,12 +168,20 @@ def generate_description_for_product(
     title: str,
     code: str = "",
     woo_product_id: str | int | None = None,
+    *,
+    web_cache: WebResearchCache | None = None,
+    web_search: bool = True,
 ) -> ProductDescription:
     if title in PRODUCT_FACTS:
         facts = get_facts_for_product(title, code=code, woo_product_id=woo_product_id)
+        notes = "researched-facts"
     else:
         facts = build_fallback_facts(title, code=code, woo_product_id=woo_product_id)
-    return build_description(facts)
+        facts = enrich_facts_from_web(facts, cache=web_cache, enabled=web_search)
+        notes = facts.category_hint or "category-fallback"
+    description = build_description(facts)
+    description.notes = notes
+    return description
 
 
 def run_batch(
@@ -178,7 +189,9 @@ def run_batch(
     sync_report: Path | None = None,
     catalog: Path | None = None,
     output: Path | None = None,
-    limit: int = 20,
+    limit: int | None = 20,
+    web_search: bool = True,
+    save_every: int = 25,
 ) -> Path:
     sync_path, catalog_path, output_path = default_paths()
     sync_report = sync_report or sync_path
@@ -191,26 +204,96 @@ def run_batch(
         descriptions_report=output,
         limit=limit,
     )
+    if not pending:
+        return output
+
     existing = read_descriptions_report(output) if output.is_file() else {}
-    generated = [
-        generate_description_for_product(
-            product.title,
-            code=product.code,
-            woo_product_id=product.woo_product_id,
+    web_cache = WebResearchCache()
+    generated: list[ProductDescription] = []
+
+    for index, product in enumerate(pending, start=1):
+        generated.append(
+            generate_description_for_product(
+                product.title,
+                code=product.code,
+                woo_product_id=product.woo_product_id,
+                web_cache=web_cache,
+                web_search=web_search,
+            )
         )
-        for product in pending
-    ]
+        if save_every > 0 and index % save_every == 0:
+            merged = merge_descriptions(existing, generated)
+            write_descriptions_report(
+                output,
+                merged,
+                input_path=sync_report if sync_report.is_file() and read_sync_report_has_products(sync_report) else catalog,
+            )
+            print(f"Checkpoint: saved {index}/{len(pending)} descriptions", file=sys.stderr)
+
     merged = merge_descriptions(existing, generated)
     return write_descriptions_report(
         output,
         merged,
-        input_path=sync_report if sync_report.is_file() else catalog,
+        input_path=sync_report if sync_report.is_file() and read_sync_report_has_products(sync_report) else catalog,
     )
 
 
-def main() -> int:
-    report_path = run_batch(limit=20)
+def read_sync_report_has_products(path: Path) -> bool:
+    from .description_product import read_sync_report_products
+
+    try:
+        return bool(read_sync_report_products(path))
+    except FileNotFoundError:
+        return False
+
+
+def build_parser() -> argparse.ArgumentParser:
+    sync_report, catalog, descriptions_report = default_paths()
+    parser = argparse.ArgumentParser(
+        description="Generate Persian WooCommerce product descriptions from sync report or catalog.",
+    )
+    parser.add_argument("--sync-report", type=Path, default=sync_report)
+    parser.add_argument("--catalog", type=Path, default=catalog)
+    parser.add_argument("--output", type=Path, default=descriptions_report)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum pending products to generate (0 = all pending)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Generate descriptions for all pending parent products",
+    )
+    parser.add_argument(
+        "--no-web-search",
+        action="store_true",
+        help="Skip DuckDuckGo web research enrichment",
+    )
+    parser.add_argument(
+        "--save-every",
+        type=int,
+        default=25,
+        help="Write checkpoint every N products (0 disables checkpoints)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    limit = None if args.all or args.limit == 0 else args.limit
+    report_path = run_batch(
+        sync_report=args.sync_report,
+        catalog=args.catalog,
+        output=args.output,
+        limit=limit,
+        web_search=not args.no_web_search,
+        save_every=args.save_every,
+    )
+    existing = read_descriptions_report(report_path)
     print(f"Descriptions report written to: {report_path}")
+    print(f"Total descriptions in report: {len(existing)}")
     return 0
 
 

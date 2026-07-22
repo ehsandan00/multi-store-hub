@@ -624,12 +624,28 @@ def generate_long_description(facts: ProductFacts) -> str:
         f"<li><strong>{_escape_html(title)}:</strong> {_escape_html(body)}</li>"
         for title, body in facts.benefits[:5]
     )
+    geo_line = ""
+    if facts.brand:
+        geo_line = (
+            f"<p>خرید آنلاین <strong>{_escape_html(facts.title)}</strong> "
+            f"اصل برند <strong>{_escape_html(facts.brand)}</strong> "
+            f"با ارسال سریع در سراسر ایران.</p>"
+        )
+    aeo_block = ""
+    if facts.faq:
+        aeo_items = "".join(
+            f"<li><strong>{_escape_html(q)}</strong> {_escape_html(a)}</li>"
+            for q, a in facts.faq[:3]
+        )
+        aeo_block = f"<h3>پرسش‌های رایج</h3><ul>{aeo_items}</ul>"
     return (
         f"<h2>{_escape_html(seo_title)}</h2>"
         f"<p>{_escape_html(intro)}</p>"
+        f"{geo_line}"
         f"<h3>مزایای اصلی</h3><ul>{benefit_lines}</ul>"
         f"<h3>راهنمای استفاده</h3>"
         f"<ol>{''.join(f'<li>{_escape_html(step)}</li>' for step in facts.usage_steps[:4])}</ol>"
+        f"{aeo_block}"
     )
 
 
@@ -673,6 +689,40 @@ def _header_map(headers: tuple[Any, ...]) -> dict[str, int]:
     return mapping
 
 
+def _read_parent_products_from_rows(rows: list[tuple[Any, ...]]) -> list[ProductFacts]:
+    if not rows:
+        return []
+    headers = _header_map(rows[0])
+    products: list[ProductFacts] = []
+    seen: set[str] = set()
+    for row in rows[1:]:
+        title = _pick(row, headers, {"title", "نام کالا"})
+        if not title:
+            continue
+        product_type = _pick(row, headers, {"product_type"})
+        if product_type == "variation":
+            continue
+        attr_name = _pick(row, headers, {"attribute_name", "تنوع"})
+        attr_value = _pick(row, headers, {"attribute_value", "مقدار تنوع"})
+        if attr_name and attr_value:
+            continue
+        woo_id = _pick(row, headers, {"woo_product_id"})
+        code = _pick(row, headers, {"code", "کد کالا"})
+        dedupe_key = f"{woo_id}:{title}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        products.append(
+            ProductFacts(
+                title=title,
+                woo_product_id=woo_id or None,
+                code=code,
+                product_type=product_type,
+            )
+        )
+    return products
+
+
 def read_sync_report_products(path: str | Path) -> list[ProductFacts]:
     source = Path(path)
     if not source.is_file():
@@ -680,35 +730,12 @@ def read_sync_report_products(path: str | Path) -> list[ProductFacts]:
 
     workbook = load_workbook(source, read_only=True, data_only=True)
     try:
-        sheet = workbook["Results"] if "Results" in workbook.sheetnames else workbook.worksheets[0]
+        if "Results" in workbook.sheetnames:
+            sheet = workbook["Results"]
+        else:
+            sheet = workbook.worksheets[0]
         rows = list(sheet.iter_rows(values_only=True))
-        if not rows:
-            return []
-        headers = _header_map(rows[0])
-        products: list[ProductFacts] = []
-        seen: set[str] = set()
-        for row in rows[1:]:
-            title = _pick(row, headers, {"title", "نام کالا"})
-            if not title:
-                continue
-            product_type = _pick(row, headers, {"product_type"})
-            if product_type == "variation":
-                continue
-            woo_id = _pick(row, headers, {"woo_product_id"})
-            code = _pick(row, headers, {"code", "کد کالا"})
-            dedupe_key = f"{woo_id}:{title}"
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-            products.append(
-                ProductFacts(
-                    title=title,
-                    woo_product_id=woo_id or None,
-                    code=code,
-                    product_type=product_type,
-                )
-            )
-        return products
+        return _read_parent_products_from_rows(rows)
     finally:
         workbook.close()
 
@@ -719,21 +746,7 @@ def read_catalog_products(path: str | Path) -> list[ProductFacts]:
     try:
         sheet = workbook.worksheets[0]
         rows = list(sheet.iter_rows(values_only=True))
-        headers = _header_map(rows[0])
-        products: list[ProductFacts] = []
-        seen: set[str] = set()
-        for row in rows[1:]:
-            title = _pick(row, headers, {"نام کالا", "title"})
-            if not title or title in seen:
-                continue
-            attr_name = _pick(row, headers, {"تنوع", "attribute_name"})
-            attr_value = _pick(row, headers, {"مقدار تنوع", "attribute_value"})
-            if attr_name and attr_value:
-                continue
-            code = _pick(row, headers, {"کد کالا", "code"})
-            seen.add(title)
-            products.append(ProductFacts(title=title, code=code))
-        return products
+        return _read_parent_products_from_rows(rows)
     finally:
         workbook.close()
 
